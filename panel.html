@@ -3,26 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Control del Bot</title>
+    <title>Panel Interactivo del Bot</title>
     <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f4f4f4; margin: 0; }
-        .container { text-align: center; padding: 40px; background-color: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        p { color: #666; }
-        button {
-            background-color: #007bff; color: white; padding: 15px 30px; border: none;
-            border-radius: 5px; font-size: 16px; cursor: pointer; transition: background-color 0.3s;
-        }
-        button:hover { background-color: #0056b3; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f0f2f5; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { text-align: center; padding: 30px; background-color: white; border-radius: 12px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+        h1 { color: #1c1e21; margin-bottom: 10px; }
+        p { color: #606770; margin-bottom: 25px; }
+        input { width: calc(100% - 22px); padding: 12px; margin-bottom: 20px; border: 1px solid #dddfe2; border-radius: 6px; font-size: 16px; }
+        button { background-color: #1877f2; color: white; padding: 12px 25px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; width: 100%; }
+        button:hover { background-color: #166fe5; }
+        #status { margin-top: 20px; font-weight: bold; }
+        #responses { margin-top: 20px; text-align: left; background-color: #e9ebee; padding: 15px; border-radius: 8px; min-height: 50px; max-height: 300px; overflow-y: auto; }
+        .response-item { background-color: white; padding: 10px; border-radius: 5px; margin-bottom: 8px; border-left: 4px solid #1877f2; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Panel de Control del Bot de WhatsApp</h1>
-        <p>Haz clic en el botón para enviar la secuencia de mensajes al número preconfigurado.</p>
-        <form action="/iniciar-secuencia" method="POST">
-            <button type="submit">Iniciar Secuencia Ahora</button>
-        </form>
+        <h1>Panel Interactivo del Bot</h1>
+        <p>Introduce un número de teléfono y haz clic para enviar la secuencia.</p>
+        
+        <input type="text" id="phoneNumber" placeholder="Ej: 59892484684 (con código de país)">
+        <button id="startButton">Iniciar Secuencia</button>
+        
+        <div id="status"></div>
+        
+        <h2>Respuestas Recibidas:</h2>
+        <div id="responses"></div>
     </div>
+
+    <!-- Carga la librería de Socket.IO en el cliente -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Conexión con el servidor de Socket.IO
+        const socket = io();
+
+        const startButton = document.getElementById('startButton');
+        const phoneNumberInput = document.getElementById('phoneNumber');
+        const statusDiv = document.getElementById('status');
+        const responsesDiv = document.getElementById('responses');
+
+        startButton.addEventListener('click', () => {
+            const phoneNumber = phoneNumberInput.value.trim();
+            if (!phoneNumber) {
+                statusDiv.textContent = 'Por favor, introduce un número de teléfono.';
+                statusDiv.style.color = 'red';
+                return;
+            }
+            
+            statusDiv.textContent = `Iniciando secuencia para ${phoneNumber}...`;
+            statusDiv.style.color = 'blue';
+
+            // Envía el número al servidor para iniciar la secuencia
+            socket.emit('iniciar-secuencia', phoneNumber);
+        });
+
+        // Escucha eventos del servidor
+        socket.on('status-update', (message) => {
+            statusDiv.textContent = message.text;
+            statusDiv.style.color = message.isError ? 'red' : 'green';
+        });
+
+        socket.on('nueva-respuesta', (data) => {
+            const responseElement = document.createElement('div');
+            responseElement.className = 'response-item';
+            responseElement.textContent = `De ${data.from}: ${data.text}`;
+            responsesDiv.appendChild(responseElement);
+            responsesDiv.scrollTop = responsesDiv.scrollHeight; // Auto-scroll
+        });
+    </script>
 </body>
 </html>
