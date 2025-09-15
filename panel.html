@@ -11,7 +11,7 @@
         h1, h2 { color: #1c1e21; }
         input, button { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #dddfe2; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
         button { background-color: #1877f2; color: white; cursor: pointer; }
-        button:disabled { background-color: #a0bdf5; }
+        #clearDbButton { background-color: #dc3545; } /* Botón rojo para limpiar */
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
         th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
         th { background-color: #f5f6f7; }
@@ -21,7 +21,7 @@
     <div class="container">
         <h1>Panel de Control</h1>
         <form id="sendForm">
-            <!-- Formulario de envío (sin cambios) -->
+            <!-- Formulario de envío -->
         </form>
         <div id="status"></div>
         <h2>Log de Respuestas en Vivo:</h2>
@@ -30,52 +30,31 @@
 
     <div class="table-container">
         <h2>Números Confirmados</h2>
-        <button id="viewConfirmedButton">Actualizar Lista de Confirmados</button>
+        <button id="viewConfirmedButton">Actualizar Lista</button>
+        <button id="clearDbButton">Limpiar Lista de Confirmados</button>
         <table id="confirmedTable">
-            <thead><tr><th>Número Confirmado</th><th>Mensaje</th><th>Fecha</th></tr></thead>
+            <thead><tr><th>Número Confirmado</th><th>Código</th><th>Fecha</th></tr></thead>
             <tbody><!-- Los datos se insertarán aquí --></tbody>
         </table>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // --- LÓGICA DEL FORMULARIO DE ENVÍO (igual que antes) ---
         const sendForm = document.getElementById('sendForm');
-        // ... (código del formulario) ...
-        
-        // --- LÓGICA PARA VER CONFIRMADOS ---
         const viewConfirmedButton = document.getElementById('viewConfirmedButton');
+        const clearDbButton = document.getElementById('clearDbButton');
         const confirmedTableBody = document.querySelector('#confirmedTable tbody');
         const socket = io();
 
-        viewConfirmedButton.addEventListener('click', () => {
-            console.log("Solicitando lista de confirmados...");
-            socket.emit('ver-confirmados');
-        });
-        
-        socket.on('datos-confirmados', (data) => {
-            console.log("Datos de confirmados recibidos:", data);
-            confirmedTableBody.innerHTML = ''; // Limpiar la tabla
-            if (data.length === 0) {
-                confirmedTableBody.innerHTML = '<tr><td colspan="3">No hay números confirmados todavía.</td></tr>';
-            } else {
-                data.forEach(row => {
-                    const tr = document.createElement('tr');
-                    const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES');
-                    tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
-                    confirmedTableBody.appendChild(tr);
-                });
+        // Lógica para el botón de limpiar
+        clearDbButton.addEventListener('click', () => {
+            if (confirm("¿Estás seguro de que quieres borrar TODOS los números confirmados? Esta acción no se puede deshacer.")) {
+                console.log("Enviando orden para limpiar la base de datos...");
+                socket.emit('limpiar-confirmados');
             }
         });
 
-        // --- LÓGICA PARA RESPUESTAS EN VIVO (igual que antes) ---
-        const responsesDiv = document.getElementById('responses');
-        socket.on('nueva-respuesta', (data) => {
-            // ... (código para añadir al log de respuestas) ...
-        });
-    </script>
-    <!-- Script completo para que copies y pegues -->
-    <script>
+        // El resto del script es igual, pero lo pego completo por si acaso
         const formHtml = `
             <div><label for="destinationNumber">Número de Destino:</label><input type="text" id="destinationNumber" name="destinationNumber" required></div>
             <div><label for="imageFile">Seleccionar Imagen:</label><input type="file" id="imageFile" name="imageFile" accept="image/*" required></div>
@@ -84,6 +63,7 @@
         
         const submitButton = document.getElementById('submitButton');
         const statusDiv = document.getElementById('status');
+        const responsesDiv = document.getElementById('responses');
         
         sendForm.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -96,6 +76,24 @@
             submitButton.disabled = false;
         });
 
+        viewConfirmedButton.addEventListener('click', () => {
+            socket.emit('ver-confirmados');
+        });
+        
+        socket.on('datos-confirmados', (data) => {
+            confirmedTableBody.innerHTML = '';
+            if (data.length === 0) {
+                confirmedTableBody.innerHTML = '<tr><td colspan="3">No hay números confirmados.</td></tr>';
+            } else {
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES');
+                    tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
+                    confirmedTableBody.appendChild(tr);
+                });
+            }
+        });
+        
         socket.on('nueva-respuesta', (data) => {
             const el = document.createElement('div');
             el.innerHTML = `<b>${data.from}:</b> ${data.text}`;
