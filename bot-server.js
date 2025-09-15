@@ -26,25 +26,15 @@ const pool = new Pool({
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
-        // Tabla para el historial de todos los envíos
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS envios (
-                id SERIAL PRIMARY KEY,
-                numero_destino VARCHAR(255) NOT NULL,
-                nombre_imagen VARCHAR(255),
-                estado VARCHAR(50) DEFAULT 'enviado',
-                creado_en TIMESTAMPTZ DEFAULT NOW()
-            );
-        `);
-        // Tabla para guardar solo los números confirmados
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS confirmados (
-                id SERIAL PRIMARY KEY,
-                numero_confirmado VARCHAR(255) NOT NULL UNIQUE,
-                mensaje_confirmacion VARCHAR(255),
-                confirmado_en TIMESTAMPTZ DEFAULT NOW()
-            );
-        `);
+        await client.query(`CREATE TABLE IF NOT EXISTS envios (
+            id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255),
+            estado VARCHAR(50) DEFAULT 'enviado', creado_en TIMESTAMPTZ DEFAULT NOW()
+        );`);
+        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (
+            id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL,
+            mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(numero_confirmado)
+        );`);
         console.log("✅ Tablas 'envios' y 'confirmados' verificadas y listas.");
     } catch (err) {
         console.error("❌ Error al inicializar la base de datos:", err);
@@ -55,9 +45,7 @@ async function initializeDatabase() {
 
 // --- PREPARACIÓN DE MULTER Y SISTEMA DE ARCHIVOS ---
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOADS_DIR),
     filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
@@ -74,15 +62,27 @@ app.use(express.json());
 io.on('connection', (socket) => {
     console.log(`[Socket.IO] Un usuario se ha conectado al panel. ID: ${socket.id}`);
     
-    // Escuchamos la petición para ver los confirmados
     socket.on('ver-confirmados', async () => {
         try {
             const result = await pool.query('SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC');
-            // Enviamos los datos de vuelta solo al cliente que los pidió
             socket.emit('datos-confirmados', result.rows);
-            console.log(`[DB] Se enviaron ${result.rowCount} registros confirmados al panel.`);
         } catch (dbError) {
             console.error("Error al obtener datos de confirmados:", dbError);
+        }
+    });
+
+    // ¡NUEVO! Escuchamos la orden de limpiar la base de datos
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('DELETE FROM confirmados');
+            console.log("[DB] Tabla 'confirmados' ha sido limpiada.");
+            // Avisamos a todos los paneles que la tabla está vacía para que se actualicen
+            const result = await pool.query('SELECT * FROM confirmados');
+            io.emit('datos-confirmados', result.rows);
+            socket.emit('status-update', { text: "✅ Base de datos de confirmados limpiada con éxito.", isError: false, isComplete: true });
+        } catch (dbError) {
+            console.error("Error al limpiar la tabla de confirmados:", dbError);
+            socket.emit('status-update', { text: "❌ Error al limpiar la base de datos.", isError: true, isComplete: true });
         }
     });
 });
@@ -90,77 +90,53 @@ io.on('connection', (socket) => {
 // --- ENDPOINTS DE EXPRESS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
 
-// WEBHOOK CON LÓGICA DE CONFIRMACIÓN ACTUALIZADA
 app.post('/webhook', async (req, res) => {
-    res.sendStatus(200); // Respondemos a Meta inmediatamente
-
+    res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (message && message.type === 'text') {
         const from = message.from;
-        const textBody = message.text.body.trim(); // "confirmado 12345678"
-        
-        console.log(`Mensaje de texto recibido de ${from}: "${textBody}"`);
-        
-        // --- NUEVA LÓGICA DE VALIDACIÓN ---
-        // Usamos una expresión regular para buscar el patrón:
-        // ^            - Inicio de la cadena
-        // confirmado   - La palabra literal "confirmado" (insensible a mayúsculas con /i)
-        // \s+          - Uno o más espacios en blanco
-        // (\d{8})      - Un grupo de captura con exactamente 8 dígitos
-        // $            - Fin de la cadena
+        const textBody = message.text.body.trim();
         const match = textBody.match(/^confirmado\s+(\d{8})$/i);
-
-        // Si 'match' no es nulo, significa que el patrón se encontró.
+        
         if (match) {
-            // El número de 8 dígitos capturado estará en match[1]
-            const numeroConfirmado = match[1]; 
-            
-            console.log(`✅ ¡CONFIRMACIÓN VÁLIDA DETECTADA! Palabra clave: 'confirmado', Número: ${numeroConfirmado}`);
-            
+            const numeroConfirmadoCodigo = match[1];
+            console.log(`✅ ¡CONFIRMACIÓN VÁLIDA! De: ${from}, Código: ${numeroConfirmadoCodigo}`);
             try {
-                // Insertamos el número de teléfono del REMITENTE y el NÚMERO DE 8 DÍGITOS
-                await pool.query(
-                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2) ON CONFLICT (numero_confirmado) DO NOTHING`,
-                    [from, numeroConfirmado] // Guardamos el número del usuario y el código que envió
+                // Usamos 'ON CONFLICT ... DO UPDATE' para manejar duplicados de forma robusta.
+                // Si el número ya existe, actualiza el código y la fecha.
+                const result = await pool.query(
+                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) 
+                     VALUES ($1, $2) 
+                     ON CONFLICT (numero_confirmado) 
+                     DO UPDATE SET mensaje_confirmacion = EXCLUDED.mensaje_confirmacion, confirmado_en = NOW()`,
+                    [from, numeroConfirmadoCodigo]
                 );
-                console.log(`[DB] Número ${from} guardado/ignorado en la tabla de confirmados con el código ${numeroConfirmado}.`);
-                
-                // Notificamos al panel web que hubo una confirmación
-                io.emit('nueva-respuesta', { from, text: `✅ CONFIRMADO con código: ${numeroConfirmado}` });
-
+                console.log(`[DB] Guardado/Actualizado ${from} con código ${numeroConfirmadoCodigo}. Filas afectadas: ${result.rowCount}`);
+                io.emit('nueva-respuesta', { from, text: `✅ CONFIRMADO con código: ${numeroConfirmadoCodigo}` });
             } catch (dbError) {
                 console.error("Error al guardar en la tabla de confirmados:", dbError);
             }
         } else {
-            // Si no es una confirmación, solo lo mostramos en el panel como un mensaje normal
-            console.log(`Mensaje de ${from} no es una confirmación válida.`);
             io.emit('nueva-respuesta', { from, text: textBody });
         }
     } else if (message) {
-        // Manejar otros tipos de mensajes si es necesario
         io.emit('nueva-respuesta', { from: message.from, text: `(Mensaje de tipo ${message.type})` });
     }
 });
 
 app.post('/iniciar-secuencia', upload.single('imageFile'), async (req, res) => {
+    // ... (sin cambios) ...
     const { destinationNumber } = req.body;
     const imageFile = req.file;
-
     if (!destinationNumber || !imageFile) {
         return res.status(400).json({ message: "Faltan datos." });
     }
-
     try {
-        const result = await pool.query(
-            'INSERT INTO envios (numero_destino, nombre_imagen) VALUES ($1, $2) RETURNING id',
-            [destinationNumber, imageFile.filename]
-        );
-        const envioId = result.rows[0].id;
-        
-        executeSendSequence(destinationNumber, imageFile, io, envioId);
+        const result = await pool.query('INSERT INTO envios (numero_destino, nombre_imagen) VALUES ($1, $2) RETURNING id', [destinationNumber, imageFile.filename]);
+        executeSendSequence(destinationNumber, imageFile, io, result.rows[0].id);
         res.status(200).json({ message: "Solicitud recibida." });
     } catch (dbError) {
-        console.error("Error al registrar el envío en la base de datos:", dbError);
+        console.error("Error al registrar el envío:", dbError);
         res.status(500).json({ message: "Error interno del servidor." });
     }
 });
@@ -174,14 +150,14 @@ server.listen(PORT, async () => {
     await initializeDatabase();
 });
 
-// --- FUNCIONES (sin cambios significativos) ---
+// --- FUNCIONES (sin cambios) ---
 const HEADERS = { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' };
 const API_URL = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function executeSendSequence(recipientNumber, imageFile, socket, envioId) {
     const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageFile.filename}`;
-    socket.emit('status-update', { text: `Enviando secuencia a ${recipientNumber}...`, isError: false });
+    socket.emit('status-update', { text: `Enviando a ${recipientNumber}...`, isError: false });
     try {
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
         await delay(3000);
@@ -189,10 +165,10 @@ async function executeSendSequence(recipientNumber, imageFile, socket, envioId) 
         await delay(3000);
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', envioId]);
-        socket.emit('status-update', { text: `✅ Secuencia enviada a ${recipientNumber}.`, isError: false, isComplete: true });
+        socket.emit('status-update', { text: `✅ Secuencia enviada.`, isError: false, isComplete: true });
     } catch (error) {
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['fallido', envioId]);
-        socket.emit('status-update', { text: `🚫 Falló la secuencia para ${recipientNumber}.`, isError: true, isComplete: true });
+        socket.emit('status-update', { text: `🚫 Falló la secuencia.`, isError: true, isComplete: true });
     } finally {
         setTimeout(() => { fs.unlink(imageFile.path, () => {}); }, 60000);
     }
