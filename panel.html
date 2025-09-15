@@ -3,26 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Envío del Bot</title>
+    <title>Panel de Control Interactivo</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f0f2f5; margin: 0; padding: 20px; box-sizing: border-box; }
         .container { text-align: center; padding: 30px; background-color: white; border-radius: 12px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
         h1 { color: #1c1e21; margin-bottom: 10px; }
         p { color: #606770; margin-bottom: 25px; }
-        form div { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; text-align: left; }
-        input { width: calc(100% - 24px); padding: 12px; border: 1px solid #dddfe2; border-radius: 6px; font-size: 16px; }
+        form div { margin-bottom: 20px; text-align: left; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 12px; border: 1px solid #dddfe2; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
         button { background-color: #1877f2; color: white; padding: 12px 25px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; width: 100%; }
-        button:hover { background-color: #166fe5; }
+        button:hover:not(:disabled) { background-color: #166fe5; }
+        button:disabled { background-color: #a0bdf5; cursor: not-allowed; }
+        #status, #responses { margin-top: 20px; }
+        #status { font-weight: bold; min-height: 1.2em; }
+        #responses { text-align: left; background-color: #e9ebee; padding: 15px; border-radius: 8px; min-height: 50px; max-height: 300px; overflow-y: auto; }
+        .response-item { background-color: white; padding: 10px; border-radius: 5px; margin-bottom: 8px; border-left: 4px solid #1877f2; white-space: pre-wrap; word-wrap: break-word; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Panel de Envío del Bot</h1>
-        <p>Sube una imagen, introduce el número de destino y haz clic para enviar la secuencia.</p>
+        <h1>Panel de Control del Bot</h1>
+        <p>Sube una imagen, introduce el número de destino y haz clic para enviar.</p>
         
-        <!-- El formulario necesita 'enctype' para poder subir archivos -->
-        <form action="/iniciar-secuencia" method="POST" enctype="multipart/form-data">
+        <form id="sendForm">
             <div>
                 <label for="destinationNumber">Número de Destino:</label>
                 <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 59892484684" required>
@@ -31,8 +35,74 @@
                 <label for="imageFile">Seleccionar Imagen:</label>
                 <input type="file" id="imageFile" name="imageFile" accept="image/*" required>
             </div>
-            <button type="submit">Enviar Secuencia</button>
+            <button type="submit" id="submitButton">Enviar Secuencia</button>
         </form>
+        
+        <div id="status"></div>
+        
+        <h2>Respuestas Recibidas:</h2>
+        <div id="responses"></div>
     </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const sendForm = document.getElementById('sendForm');
+        const submitButton = document.getElementById('submitButton');
+        const statusDiv = document.getElementById('status');
+        const responsesDiv = document.getElementById('responses');
+
+        sendForm.addEventListener('submit', async (event) => {
+            event.preventDefault(); // Evitamos que la página se recargue
+            
+            const formData = new FormData(sendForm);
+            if (!formData.get('destinationNumber') || !formData.get('imageFile').size) {
+                statusDiv.textContent = 'Por favor, completa todos los campos.';
+                statusDiv.style.color = 'red';
+                return;
+            }
+
+            submitButton.disabled = true;
+            statusDiv.textContent = 'Subiendo imagen y procesando...';
+            statusDiv.style.color = 'blue';
+
+            try {
+                // Usamos fetch para enviar el formulario en segundo plano
+                const response = await fetch('/iniciar-secuencia', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.message || 'Error en el servidor.');
+                }
+                
+                statusDiv.textContent = '¡Solicitud recibida! La secuencia se está enviando.';
+                statusDiv.style.color = 'green';
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+                statusDiv.style.color = 'red';
+                submitButton.disabled = false;
+            }
+        });
+
+        // Escuchamos los eventos del servidor
+        socket.on('status-update', (message) => {
+            statusDiv.textContent = message.text;
+            statusDiv.style.color = message.isError ? 'red' : 'green';
+            if (message.isComplete) {
+                submitButton.disabled = false;
+            }
+        });
+
+        socket.on('nueva-respuesta', (data) => {
+            const responseElement = document.createElement('div');
+            responseElement.className = 'response-item';
+            responseElement.textContent = `De ${data.from}: ${data.text}`;
+            responsesDiv.appendChild(responseElement);
+            responsesDiv.scrollTop = responsesDiv.scrollHeight;
+        });
+    </script>
 </body>
 </html>
