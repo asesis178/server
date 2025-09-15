@@ -55,27 +55,53 @@ app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html'))
 app.get('/webhook', (req, res) => { /* ... (código completo al final) ... */ });
 
 // WEBHOOK CORREGIDO Y CON MÁS LOGS
-app.post('/webhook', (req, res) => {
-    console.log('[Webhook] Notificación POST recibida de Meta.');
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+// ... (todo el código anterior a esto se queda igual) ...
 
+// WEBHOOK MÁS INTELIGENTE Y MENOS RUIDOSO
+app.post('/webhook', (req, res) => {
+    const body = req.body;
+
+    // Inmediatamente respondemos a Meta para que no espere.
+    // Esto es crucial para un buen rendimiento.
+    res.sendStatus(200);
+
+    // Verificamos si la notificación es sobre un MENSAJE NUEVO.
+    // Los mensajes de usuarios están en 'entry[0].changes[0].value.messages'.
+    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+
+    // Si 'message' existe, significa que es un mensaje de un usuario.
     if (message) {
-        console.log(`[Webhook] Mensaje válido detectado de ${message.from}.`);
+        console.log(`[Webhook] Mensaje de usuario detectado de ${message.from}.`);
         const dataToSend = {
             from: message.from,
             text: message.text?.body || `(Mensaje de tipo ${message.type})`
         };
         
-        // ¡LA LÍNEA MÁS IMPORTANTE! Emitimos el evento a los clientes.
+        // Solo si es un mensaje de usuario, lo emitimos al panel.
         io.emit('nueva-respuesta', dataToSend);
         
-        console.log('[Webhook] Evento "nueva-respuesta" emitido a todos los clientes conectados.', dataToSend);
-    } else {
-        console.log('[Webhook] La notificación no contenía un mensaje procesable.');
+        console.log('[Socket.IO] Evento "nueva-respuesta" emitido al panel.');
+        
+        return; // Terminamos la ejecución para este caso.
     }
-    
-    res.sendStatus(200);
+
+    // Verificamos si la notificación es sobre un ESTADO (delivered, read, sent).
+    // Estos son los que generan "ruido".
+    const status = body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
+    if (status) {
+        // Simplemente lo registramos de forma silenciosa y no hacemos nada más.
+        // Puedes incluso comentar la siguiente línea si no quieres ver NADA.
+        console.log(`[Webhook] Notificación de estado recibida: ${status.status}. Ignorando.`);
+        
+        return; // Terminamos la ejecución.
+    }
+
+    // Si llega aquí, es otro tipo de notificación que no manejamos.
+    console.log('[Webhook] Notificación recibida que no es ni mensaje ni estado. Ignorando.');
 });
+
+
+// ... (el resto del código, como app.post('/iniciar-secuencia'), etc., se queda igual) ...
 
 app.post('/iniciar-secuencia', upload.single('imageFile'), (req, res) => {
     const { destinationNumber } = req.body;
