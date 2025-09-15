@@ -1,97 +1,91 @@
+// Carga las variables de entorno desde el archivo .env (para pruebas locales)
+// o desde el entorno del servidor (para producción en Render)
 require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const axios = require('axios');
 
-// --- CONFIGURACIÓN DESDE .ENV ---
+// --- CONFIGURACIÓN LEÍDA DESDE EL ENTORNO ---
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN; // Ahora lo leemos desde .env
-const PORT = process.env.PORT || 3000; // El servidor nos dará un puerto, si no, usamos 3000
-
-const RECIPIENT_PHONE_NUMBER = "59892484684";
-const LOCAL_IMAGE_FOLDER = 'public';
-const LOCAL_IMAGE_FILENAME = 'cedula_ejemplo.jpg';
-const PAUSE_DURATION = 5000;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN; // ¡CRUCIAL PARA LA VALIDACIÓN!
+const PORT = process.env.PORT || 3000;
 
 // --- INICIALIZACIÓN DEL SERVIDOR EXPRESS ---
 const app = express();
+// Middleware esencial para que Express pueda leer el JSON que envía Meta
 app.use(express.json());
 
-// --- FUNCIONES DE ENVÍO (sin cambios) ---
-const API_URL = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-const HEADERS = { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' };
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function sendWhatsAppMessage(data) { /* ... esta función no cambia ... */ }
-
-// --- WEBHOOK (sin cambios) ---
-app.get('/webhook', (req, res) => { /* ... esta función no cambia ... */ });
-app.post('/webhook', (req, res) => { /* ... esta función no cambia ... */ });
-
-// --- RUTA DE PRUEBA Y PARA SERVIR IMÁGENES ---
-// Hacemos que la carpeta 'public' sea accesible
-app.use('/static', express.static(path.join(__dirname, LOCAL_IMAGE_FOLDER)));
-// Una ruta raíz para saber que el servidor está vivo
-app.get('/', (req, res) => {
-    res.send('¡El servidor del bot de WhatsApp está vivo y coleando!');
-});
-
-// --- FUNCIÓN DE INICIO DEL SERVIDOR ---
-async function startServer() {
-    app.listen(PORT, async () => {
-        console.log(`🚀 Servidor iniciado y escuchando en el puerto ${PORT}`);
-        
-        // --- Opcional: Enviar secuencia al iniciar ---
-        // Descomenta las siguientes líneas si quieres que el bot envíe la secuencia CADA VEZ que el servidor se reinicie.
-        // OJO: Los servicios gratuitos se reinician aprox. una vez al día.
-        /*
-        try {
-            console.log("Ejecutando secuencia de envío inicial...");
-            const publicUrl = `TU_URL_DE_RENDER/static/${LOCAL_IMAGE_FILENAME}`; // Necesitarás la URL final aquí
-            await sendWhatsAppMessage({ type: "template", template: { name: "hello_world", language: { code: "en_US" } } });
-            await delay(PAUSE_DURATION);
-            await sendWhatsAppMessage({ type: "text", text: { body: "3" } });
-            await delay(PAUSE_DURATION);
-            await sendWhatsAppMessage({ type: "image", image: { link: publicUrl } });
-            console.log("✅ Secuencia de envío inicial completada.");
-        } catch (error) {
-            console.error("Falló la secuencia de envío inicial:", error);
-        }
-        */
-       console.log("🤖 El bot está en modo de escucha permanente.");
-    });
+// --- VERIFICACIÓN DE VARIABLES DE ENTORNO ---
+// Comprobamos al inicio que todas las claves secretas estén presentes.
+if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID || !VERIFY_TOKEN) {
+    console.error("ERROR CRÍTICO: Faltan variables de entorno. Asegúrate de que WHATSAPP_TOKEN, PHONE_NUMBER_ID, y VERIFY_TOKEN estén configuradas.");
+    process.exit(1); // Detiene la aplicación si faltan secretos
 }
 
-// Re-pego las funciones que marqué como "sin cambios" para que tengas el código completo y funcional
-async function sendWhatsAppMessage(data) {
-    try {
-        await axios.post(API_URL, { messaging_product: "whatsapp", to: RECIPIENT_PHONE_NUMBER, ...data }, { headers: HEADERS });
-        console.log(`✅ Mensaje de tipo '${data.type}' enviado con éxito.`);
-    } catch (error) {
-        console.error(`❌ Error al enviar mensaje de tipo '${data.type}':`, error.response?.data?.error || error.message);
-    }
-}
+
+// --- WEBHOOK: La puerta de entrada para Meta ---
+
+// PARTE 1: Verificación del Webhook (método GET)
+// Meta usa esta ruta UNA SOLA VEZ para asegurarse de que eres el dueño del servidor.
 app.get('/webhook', (req, res) => {
-    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
-        res.status(200).send(req.query['hub.challenge']);
+    console.log("Recibida petición de verificación de webhook (GET)...");
+
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    // Comprueba que el modo sea 'subscribe' y que el token coincida con el nuestro.
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+        console.log("¡Verificación de Webhook exitosa!");
+        res.status(200).send(challenge);
     } else {
-        res.status(403).send("Forbidden");
+        // Si no coinciden, rechaza la petición.
+        console.error("Fallo en la verificación del Webhook. Los tokens no coinciden.");
+        res.sendStatus(403); // Forbidden
     }
 });
+
+// PARTE 2: Recepción de Mensajes (método POST)
+// Meta usa esta ruta cada vez que un usuario te envía un mensaje.
 app.post('/webhook', (req, res) => {
     const body = req.body;
+
+    // Imprimimos el cuerpo completo para depuración
+    console.log('Recibida notificación de webhook (POST):', JSON.stringify(body, null, 2));
+
+    // Procesamos el mensaje si es válido
     if (body.object === 'whatsapp_business_account' && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
         const message = body.entry[0].changes[0].value.messages[0];
+        
         console.log("\n=============================================");
         console.log(`<<<<< MENSAJE RECIBIDO DE ${message.from}! >>>>>`);
-        if (message.type === 'text') console.log(`   💬 Contenido: "${message.text.body}"`);
-        else console.log(`   ❔ Tipo de mensaje: ${message.type}`);
+        if (message.type === 'text') {
+            console.log(`   💬 Contenido: "${message.text.body}"`);
+        } else {
+            console.log(`   ❔ Tipo de mensaje: ${message.type}`);
+        }
         console.log("=============================================\n");
     }
+
+    // Le decimos a Meta que recibimos la notificación correctamente.
+    // Es crucial responder siempre con 200, de lo contrario Meta pensará que tu bot está caído.
     res.sendStatus(200);
 });
 
 
-// ¡Ejecutar el servidor!
-startServer();
+// --- RUTAS ADICIONALES ---
+
+// Una ruta raíz para hacer un test rápido y saber que el servidor está vivo.
+app.get('/', (req, res) => {
+    res.send('¡El servidor del bot de WhatsApp está vivo y coleando!');
+});
+
+
+// --- INICIO DEL SERVIDOR ---
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor iniciado. Escuchando en el puerto ${PORT}`);
+    console.log("🤖 El bot está en modo de escucha permanente.");
+    console.log("Ahora puedes configurar tu webhook en el panel de Meta.");
+});
