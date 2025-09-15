@@ -6,16 +6,54 @@ const axios = require('axios');
 const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
+const { Pool } = require('pg');
 
 // --- CONFIGURACIÓN ---
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = "https://server-2-ydpr.onrender.com";
-const PAUSE_DURATION = 5000;
 
-// --- PREPARACIÓN DEL SISTEMA DE ARCHIVOS Y MULTER ---
+// --- CONFIGURACIÓN DE LA BASE DE DATOS ---
+const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
+
+// --- FUNCIÓN PARA INICIALIZAR LA BASE DE DATOS ---
+async function initializeDatabase() {
+    const client = await pool.connect();
+    try {
+        // Tabla para el historial de todos los envíos
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS envios (
+                id SERIAL PRIMARY KEY,
+                numero_destino VARCHAR(255) NOT NULL,
+                nombre_imagen VARCHAR(255),
+                estado VARCHAR(50) DEFAULT 'enviado',
+                creado_en TIMESTAMPTZ DEFAULT NOW()
+            );
+        `);
+        // Tabla para guardar solo los números confirmados
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS confirmados (
+                id SERIAL PRIMARY KEY,
+                numero_confirmado VARCHAR(255) NOT NULL UNIQUE,
+                mensaje_confirmacion VARCHAR(255),
+                confirmado_en TIMESTAMPTZ DEFAULT NOW()
+            );
+        `);
+        console.log("✅ Tablas 'envios' y 'confirmados' verificadas y listas.");
+    } catch (err) {
+        console.error("❌ Error al inicializar la base de datos:", err);
+    } finally {
+        client.release();
+    }
+}
+
+// --- PREPARACIÓN DE MULTER Y SISTEMA DE ARCHIVOS ---
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -32,128 +70,112 @@ const server = http.createServer(app);
 const io = new Server(server);
 app.use(express.json());
 
-// --- FUNCIONES Y SECUENCIA ---
-const API_URL = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-const HEADERS = { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' };
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function executeSendSequence(recipientNumber, imageFile, socket) { /* ... (código completo al final) ... */ }
-async function sendWhatsAppMessage(data, recipient) { /* ... (código completo al final) ... */ }
-
 // --- LÓGICA DE SOCKET.IO ---
 io.on('connection', (socket) => {
-    // Log para saber que el navegador se conectó correctamente
-    console.log(`[Socket.IO] ✅ Un usuario se ha conectado al panel web. ID: ${socket.id}`);
+    console.log(`[Socket.IO] Un usuario se ha conectado al panel. ID: ${socket.id}`);
     
-    socket.on('disconnect', () => {
-        console.log(`[Socket.IO] ❌ Un usuario se ha desconectado. ID: ${socket.id}`);
+    // Escuchamos la petición para ver los confirmados
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query('SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC');
+            // Enviamos los datos de vuelta solo al cliente que los pidió
+            socket.emit('datos-confirmados', result.rows);
+            console.log(`[DB] Se enviaron ${result.rowCount} registros confirmados al panel.`);
+        } catch (dbError) {
+            console.error("Error al obtener datos de confirmados:", dbError);
+        }
     });
 });
 
 // --- ENDPOINTS DE EXPRESS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
-app.get('/webhook', (req, res) => { /* ... (código completo al final) ... */ });
 
-// WEBHOOK CORREGIDO Y CON MÁS LOGS
-// ... (todo el código anterior a esto se queda igual) ...
+app.post('/webhook', async (req, res) => {
+    res.sendStatus(200); // Respondemos a Meta inmediatamente
 
-// WEBHOOK MÁS INTELIGENTE Y MENOS RUIDOSO
-app.post('/webhook', (req, res) => {
-    const body = req.body;
-
-    // Inmediatamente respondemos a Meta para que no espere.
-    // Esto es crucial para un buen rendimiento.
-    res.sendStatus(200);
-
-    // Verificamos si la notificación es sobre un MENSAJE NUEVO.
-    // Los mensajes de usuarios están en 'entry[0].changes[0].value.messages'.
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
-    // Si 'message' existe, significa que es un mensaje de un usuario.
-    if (message) {
-        console.log(`[Webhook] Mensaje de usuario detectado de ${message.from}.`);
-        const dataToSend = {
-            from: message.from,
-            text: message.text?.body || `(Mensaje de tipo ${message.type})`
-        };
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (message && message.type === 'text') {
+        const from = message.from;
+        const textBody = message.text.body.trim();
         
-        // Solo si es un mensaje de usuario, lo emitimos al panel.
-        io.emit('nueva-respuesta', dataToSend);
+        console.log(`Mensaje de texto recibido de ${from}: "${textBody}"`);
         
-        console.log('[Socket.IO] Evento "nueva-respuesta" emitido al panel.');
-        
-        return; // Terminamos la ejecución para este caso.
+        // Lógica de confirmación: ¿es un número de 3 dígitos?
+        if (/^\d{3}$/.test(textBody)) {
+            console.log(`¡CONFIRMACIÓN DETECTADA! El mensaje "${textBody}" es un número de 3 dígitos.`);
+            try {
+                // Insertamos en la tabla 'confirmados', ignorando si el número ya existe (ON CONFLICT DO NOTHING)
+                await pool.query(
+                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2) ON CONFLICT (numero_confirmado) DO NOTHING`,
+                    [from, textBody]
+                );
+                console.log(`[DB] Número ${from} guardado/ignorado en la tabla de confirmados.`);
+                io.emit('nueva-respuesta', { from, text: `✅ CONFIRMADO con: ${textBody}` });
+            } catch (dbError) {
+                console.error("Error al guardar en la tabla de confirmados:", dbError);
+            }
+        } else {
+            // Si no es una confirmación, solo lo mostramos en el panel
+            io.emit('nueva-respuesta', { from, text: textBody });
+        }
+    } else if (message) {
+        // Manejar otros tipos de mensajes si es necesario
+        io.emit('nueva-respuesta', { from: message.from, text: `(Mensaje de tipo ${message.type})` });
     }
-
-    // Verificamos si la notificación es sobre un ESTADO (delivered, read, sent).
-    // Estos son los que generan "ruido".
-    const status = body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
-    if (status) {
-        // Simplemente lo registramos de forma silenciosa y no hacemos nada más.
-        // Puedes incluso comentar la siguiente línea si no quieres ver NADA.
-        console.log(`[Webhook] Notificación de estado recibida: ${status.status}. Ignorando.`);
-        
-        return; // Terminamos la ejecución.
-    }
-
-    // Si llega aquí, es otro tipo de notificación que no manejamos.
-    console.log('[Webhook] Notificación recibida que no es ni mensaje ni estado. Ignorando.');
 });
 
-
-// ... (el resto del código, como app.post('/iniciar-secuencia'), etc., se queda igual) ...
-
-app.post('/iniciar-secuencia', upload.single('imageFile'), (req, res) => {
+app.post('/iniciar-secuencia', upload.single('imageFile'), async (req, res) => {
     const { destinationNumber } = req.body;
     const imageFile = req.file;
+
     if (!destinationNumber || !imageFile) {
         return res.status(400).json({ message: "Faltan datos." });
     }
-    // Usamos 'io' para emitir estados a todos, ya que no tenemos un socket específico para esta petición HTTP
-    executeSendSequence(destinationNumber, imageFile, io);
-    res.status(200).json({ message: "Solicitud recibida." });
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO envios (numero_destino, nombre_imagen) VALUES ($1, $2) RETURNING id',
+            [destinationNumber, imageFile.filename]
+        );
+        const envioId = result.rows[0].id;
+        
+        executeSendSequence(destinationNumber, imageFile, io, envioId);
+        res.status(200).json({ message: "Solicitud recibida." });
+    } catch (dbError) {
+        console.error("Error al registrar el envío en la base de datos:", dbError);
+        res.status(500).json({ message: "Error interno del servidor." });
+    }
 });
 
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/', (req, res) => res.send('¡Servidor activo! Visita /panel para usar el control.'));
 
-// --- INICIO DEL SERVIDOR HTTP ---
-server.listen(PORT, () => {
+// --- INICIO DEL SERVIDOR ---
+server.listen(PORT, async () => {
     console.log(`🚀 Servidor iniciado. Escuchando en el puerto ${PORT}`);
+    await initializeDatabase();
 });
 
-// --- CÓDIGO COMPLETO DE FUNCIONES REUTILIZADAS ---
-async function executeSendSequence(recipientNumber, imageFile, socket) {
+// --- FUNCIONES (sin cambios significativos) ---
+const HEADERS = { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' };
+const API_URL = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function executeSendSequence(recipientNumber, imageFile, socket, envioId) {
     const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageFile.filename}`;
     socket.emit('status-update', { text: `Enviando secuencia a ${recipientNumber}...`, isError: false });
     try {
-        await sendWhatsAppMessage({ type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, recipientNumber);
-        await delay(PAUSE_DURATION);
-        await sendWhatsAppMessage({ type: "text", text: { body: "3" } }, recipientNumber);
-        await delay(PAUSE_DURATION);
-        await sendWhatsAppMessage({ type: "image", image: { link: publicImageUrl } }, recipientNumber);
-        socket.emit('status-update', { text: `✅ Secuencia enviada a ${recipientNumber} con éxito.`, isError: false, isComplete: true });
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
+        await delay(3000);
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
+        await delay(3000);
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
+        await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', envioId]);
+        socket.emit('status-update', { text: `✅ Secuencia enviada a ${recipientNumber}.`, isError: false, isComplete: true });
     } catch (error) {
-        socket.emit('status-update', { text: `🚫 Falló la secuencia para ${recipientNumber}. Revisa los logs.`, isError: true, isComplete: true });
+        await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['fallido', envioId]);
+        socket.emit('status-update', { text: `🚫 Falló la secuencia para ${recipientNumber}.`, isError: true, isComplete: true });
     } finally {
-        setTimeout(() => {
-            fs.unlink(imageFile.path, (err) => {
-                if (err) console.error(`Error al borrar archivo ${imageFile.path}:`, err);
-                else console.log(`Archivo temporal ${imageFile.path} borrado.`);
-            });
-        }, 60000);
+        setTimeout(() => { fs.unlink(imageFile.path, () => {}); }, 60000);
     }
 }
-async function sendWhatsAppMessage(data, recipientNumber) {
-    try {
-        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, ...data }, { headers: HEADERS });
-    } catch (error) {
-        console.error(`❌ Error al enviar mensaje de tipo '${data.type}':`, error.response?.data?.error || error.message);
-        throw error;
-    }
-}
-app.get('/webhook', (req, res) => {
-    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
-        res.status(200).send(req.query['hub.challenge']);
-    } else { res.sendStatus(403); }
-});
