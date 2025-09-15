@@ -90,32 +90,50 @@ io.on('connection', (socket) => {
 // --- ENDPOINTS DE EXPRESS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
 
+// WEBHOOK CON LÓGICA DE CONFIRMACIÓN ACTUALIZADA
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200); // Respondemos a Meta inmediatamente
 
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (message && message.type === 'text') {
         const from = message.from;
-        const textBody = message.text.body.trim();
+        const textBody = message.text.body.trim(); // "confirmado 12345678"
         
         console.log(`Mensaje de texto recibido de ${from}: "${textBody}"`);
         
-        // Lógica de confirmación: ¿es un número de 3 dígitos?
-        if (/^\d{3}$/.test(textBody)) {
-            console.log(`¡CONFIRMACIÓN DETECTADA! El mensaje "${textBody}" es un número de 3 dígitos.`);
+        // --- NUEVA LÓGICA DE VALIDACIÓN ---
+        // Usamos una expresión regular para buscar el patrón:
+        // ^            - Inicio de la cadena
+        // confirmado   - La palabra literal "confirmado" (insensible a mayúsculas con /i)
+        // \s+          - Uno o más espacios en blanco
+        // (\d{8})      - Un grupo de captura con exactamente 8 dígitos
+        // $            - Fin de la cadena
+        const match = textBody.match(/^confirmado\s+(\d{8})$/i);
+
+        // Si 'match' no es nulo, significa que el patrón se encontró.
+        if (match) {
+            // El número de 8 dígitos capturado estará en match[1]
+            const numeroConfirmado = match[1]; 
+            
+            console.log(`✅ ¡CONFIRMACIÓN VÁLIDA DETECTADA! Palabra clave: 'confirmado', Número: ${numeroConfirmado}`);
+            
             try {
-                // Insertamos en la tabla 'confirmados', ignorando si el número ya existe (ON CONFLICT DO NOTHING)
+                // Insertamos el número de teléfono del REMITENTE y el NÚMERO DE 8 DÍGITOS
                 await pool.query(
                     `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2) ON CONFLICT (numero_confirmado) DO NOTHING`,
-                    [from, textBody]
+                    [from, numeroConfirmado] // Guardamos el número del usuario y el código que envió
                 );
-                console.log(`[DB] Número ${from} guardado/ignorado en la tabla de confirmados.`);
-                io.emit('nueva-respuesta', { from, text: `✅ CONFIRMADO con: ${textBody}` });
+                console.log(`[DB] Número ${from} guardado/ignorado en la tabla de confirmados con el código ${numeroConfirmado}.`);
+                
+                // Notificamos al panel web que hubo una confirmación
+                io.emit('nueva-respuesta', { from, text: `✅ CONFIRMADO con código: ${numeroConfirmado}` });
+
             } catch (dbError) {
                 console.error("Error al guardar en la tabla de confirmados:", dbError);
             }
         } else {
-            // Si no es una confirmación, solo lo mostramos en el panel
+            // Si no es una confirmación, solo lo mostramos en el panel como un mensaje normal
+            console.log(`Mensaje de ${from} no es una confirmación válida.`);
             io.emit('nueva-respuesta', { from, text: textBody });
         }
     } else if (message) {
