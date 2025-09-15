@@ -12,17 +12,28 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
-const RENDER_EXTERNAL_URL = "https://server-2-ydpr.onrender.com"; // <-- ¡Verifica tu URL!
+const RENDER_EXTERNAL_URL = "https://server-2-ydpr.onrender.com";
 const PAUSE_DURATION = 5000;
 
-// --- PREPARACIÓN DEL SISTEMA DE ARCHIVOS ---
+// --- PREPARACIÓN DEL SISTEMA DE ARCHIVOS Y MULTER (VERSIÓN CORREGIDA) ---
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
-// ¡Solución clave! Nos aseguramos de que la carpeta 'uploads' exista al iniciar.
 if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    console.log(`Directorio '${UPLOADS_DIR}' creado exitosamente.`);
 }
-const upload = multer({ dest: UPLOADS_DIR });
+
+// Configuración avanzada de Multer para preservar el nombre del archivo original
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, UPLOADS_DIR); // Guardar en la carpeta 'uploads'
+    },
+    filename: function (req, file, cb) {
+        // Usar un timestamp + nombre original para evitar colisiones, pero manteniendo la extensión
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage: storage });
+
 
 // --- INICIALIZACIÓN DE SERVIDORES ---
 const app = express();
@@ -35,11 +46,11 @@ const API_URL = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
 const HEADERS = { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' };
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function sendWhatsAppMessage(data, recipient) { /* ... (código completo al final) ... */ }
-
 async function executeSendSequence(recipientNumber, imageFile, socket) {
-    const publicImageUrl = `${RENDER_EXTERNAL_URL}/${imageFile.path.replace(/\\/g, "/")}`; // Reemplaza \ por / para compatibilidad
-    console.log(`🚀 Iniciando secuencia para ${recipientNumber} con la imagen: ${publicImageUrl}`);
+    // ¡CORRECCIÓN CLAVE! Construimos la URL pública usando el nombre del archivo que guardamos.
+    const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageFile.filename}`;
+    
+    console.log(`🚀 Iniciando secuencia para ${recipientNumber} con la imagen pública: ${publicImageUrl}`);
     socket.emit('status-update', { text: `Enviando secuencia a ${recipientNumber}...`, isError: false });
 
     try {
@@ -53,7 +64,7 @@ async function executeSendSequence(recipientNumber, imageFile, socket) {
     } catch (error) {
         socket.emit('status-update', { text: `🚫 Falló la secuencia para ${recipientNumber}. Revisa los logs.`, isError: true, isComplete: true });
     } finally {
-        // Borramos la imagen después de 1 minuto para dar tiempo a Meta de descargarla.
+        // Borramos la imagen después de 1 minuto
         setTimeout(() => {
             fs.unlink(imageFile.path, (err) => {
                 if (err) console.error(`Error al borrar el archivo temporal ${imageFile.path}:`, err);
@@ -71,56 +82,56 @@ io.on('connection', (socket) => {
 // --- ENDPOINTS DE EXPRESS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
 app.get('/webhook', (req, res) => { /* ... (no cambia) ... */ });
+app.post('/webhook', (req, res) => { /* ... (no cambia) ... */ });
 
-app.post('/webhook', (req, res) => {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (message) {
-        console.log(`Mensaje recibido de ${message.from}: "${message.text?.body}"`);
-        // Enviamos la respuesta a todos los paneles conectados
-        io.emit('nueva-respuesta', {
-            from: message.from,
-            text: message.text?.body || `(Mensaje de tipo ${message.type})`
-        });
-    }
-    res.sendStatus(200);
-});
-
-// Endpoint para recibir la subida de la imagen desde el panel
 app.post('/iniciar-secuencia', upload.single('imageFile'), (req, res) => {
     const { destinationNumber } = req.body;
     const imageFile = req.file;
 
     if (!destinationNumber || !imageFile) {
-        return res.status(400).json({ message: "Faltan el número de destino o el archivo de imagen." });
+        return res.status(400).json({ message: "Faltan datos." });
     }
-
-    // Disparamos la secuencia en segundo plano. Usamos 'io' porque no tenemos un 'socket' específico aquí.
     executeSendSequence(destinationNumber, imageFile, io);
-
-    res.status(200).json({ message: "Solicitud recibida. La secuencia está en proceso." });
+    res.status(200).json({ message: "Solicitud recibida." });
 });
 
-// Hacemos la carpeta 'uploads' accesible públicamente
+// ¡CORRECCIÓN CLAVE! Hacemos la carpeta 'uploads' accesible públicamente.
+// Ahora, cuando se pida '/uploads/nombre-del-archivo.png', Express lo buscará en la carpeta UPLOADS_DIR.
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/', (req, res) => res.send('¡Servidor activo! Visita /panel para usar el control.'));
 
 // --- INICIO DEL SERVIDOR HTTP ---
 server.listen(PORT, () => {
     console.log(`🚀 Servidor iniciado. Escuchando en el puerto ${PORT}`);
-    console.log("🤖 El bot y el panel interactivo están listos.");
 });
 
-// --- CÓDIGO COMPLETO DE FUNCIONES REUTILIZADAS ---
+// --- CÓDIGO COMPLETO DE FUNCIONES REUTILIZADAS (sin cambios) ---
+async function sendWhatsAppMessage(data, recipientNumber) { /* ... */ }
+app.get('/webhook', (req, res) => { /* ... */ });
+app.post('/webhook', (req, res) => { /* ... */ });
+
+// Pego el código completo de las funciones que no cambiaron para que sea un solo bloque
 async function sendWhatsAppMessage(data, recipientNumber) {
     try {
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, ...data }, { headers: HEADERS });
     } catch (error) {
         console.error(`❌ Error al enviar mensaje de tipo '${data.type}':`, error.response?.data?.error || error.message);
-        throw error; // Lanzamos el error para que la secuencia se detenga
+        throw error;
     }
 }
 app.get('/webhook', (req, res) => {
     if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
         res.status(200).send(req.query['hub.challenge']);
     } else { res.sendStatus(403); }
+});
+app.post('/webhook', (req, res) => {
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (message) {
+        console.log(`Mensaje recibido de ${message.from}: "${message.text?.body}"`);
+        io.emit('nueva-respuesta', {
+            from: message.from,
+            text: message.text?.body || `(Mensaje de tipo ${message.type})`
+        });
+    }
+    res.sendStatus(200);
 });
