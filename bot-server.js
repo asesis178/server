@@ -60,7 +60,38 @@ async function initializeDatabase() {
 }
 
 // --- LÓGICA DE SOCKET.IO ---
-io.on('connection', (socket) => { /* Sin cambios */ });
+// --- LÓGICA DE SOCKET.IO ---
+io.on('connection', (socket) => {
+    console.log(`[Socket.IO] Usuario conectado: ${socket.id}`);
+
+    // Al conectarse un nuevo usuario, enviarle el estado actual del sistema
+    socket.emit('queue-update', taskQueue.length);
+    socket.emit('workers-status-update', { available: availableWorkers.size, active: activeConversations.size });
+
+    // Listener para el botón "Actualizar Lista" del panel
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            socket.emit('datos-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener confirmados:", dbError);
+        }
+    });
+
+    // Listener para el botón "Limpiar Lista" del panel
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('DELETE FROM confirmados');
+            console.log("[DB] Tabla 'confirmados' limpiada.");
+            // Notificar a TODOS los paneles que la tabla está vacía
+            io.emit('datos-confirmados', []);
+            socket.emit('status-update', { text: "✅ DB de confirmados limpiada.", isError: false, isComplete: true });
+        } catch (dbError) {
+            console.error("Error al limpiar confirmados:", dbError);
+            socket.emit('status-update', { text: "❌ Error al limpiar la DB.", isError: true, isComplete: true });
+        }
+    });
+});
 
 // --- ENDPOINTS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
@@ -111,7 +142,54 @@ app.post('/webhook', async (req, res) => {
 
 
 // ENDPOINT PARA SUBIR EL ZIP
-app.post('/subir-zip', async (req, res) => { /* Sin cambios */ });
+app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
+    const { destinationNumber } = req.body;
+    const zipFile = req.file;
+
+    if (!destinationNumber || !zipFile) {
+        return res.status(400).json({ message: "Faltan el número de destino o el archivo ZIP." });
+    }
+
+    const zipFilePath = zipFile.path;
+
+    try {
+        const zip = new AdmZip(zipFilePath);
+        const imageFiles = zip.getEntries()
+            .filter(entry => !entry.isDirectory && /\.(jpg|jpeg|png)$/i.test(entry.entryName))
+            .map(entry => entry.entryName);
+
+        if (imageFiles.length === 0) {
+            return res.status(400).json({ message: "El ZIP no contiene imágenes válidas (jpg, jpeg, png)." });
+        }
+
+        // Crear todas las tareas a partir de las imágenes extraídas
+        const newTasks = imageFiles.map(imageName => ({
+            recipientNumber: destinationNumber,
+            imageName: imageName
+        }));
+        // Añadir las nuevas tareas a la cola principal
+        taskQueue.push(...newTasks);
+
+        // Notificar al frontend y a la consola sobre las nuevas tareas
+        logAndEmit(`📦 Se agregaron ${newTasks.length} tareas. Total en cola: ${taskQueue.length}`, 'log-info');
+        io.emit('queue-update', taskQueue.length);
+        
+        // Despertar al despachador de tareas para que empiece a asignar trabajo
+        processQueue();
+
+        res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos.` });
+
+    } catch (error) {
+        console.error("Error procesando el ZIP:", error);
+        logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
+        res.status(500).json({ message: "Error interno al procesar el archivo ZIP." });
+    } finally {
+        // Limpiar el archivo ZIP temporal, haya éxito o error
+        fs.unlink(zipFilePath, (err) => {
+            if (err) console.error("No se pudo eliminar el ZIP temporal:", err);
+        });
+    }
+});
 
 // --- LÓGICA DE PROCESAMIENTO CONCURRENTE ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -123,6 +201,7 @@ function releaseAndContinue(workerIndex) {
         availableWorkers.add(workerIndex);
         activeConversations.delete(workerIndex);
         logAndEmit(`🟢 [Worker ${workerIndex}] liberado. Libres: ${availableWorkers.size}.`, 'log-info');
+            io.emit('workers-status-update', { available: availableWorkers.size, active: activeConversations.size });
         setTimeout(processQueue, 500);
     }
 }
@@ -131,6 +210,8 @@ async function processQueue() {
     while (availableWorkers.size > 0 && taskQueue.length > 0) {
         const workerIndex = availableWorkers.values().next().value;
         availableWorkers.delete(workerIndex); // Marcar como ocupado
+
+             io.emit('workers-status-update', { available: availableWorkers.size, active: activeConversations.size });
 
         const task = taskQueue.shift();
         io.emit('queue-update', taskQueue.length);

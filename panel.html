@@ -3,182 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Control - Bot WhatsApp</title>
+    <title>Panel de Control - Bot Concurrente</title>
     <style>
         :root {
-            --color-bg: #f0f2f5;
-            --color-surface: #ffffff;
-            --color-primary: #1877f2;
-            --color-primary-hover: #166fe5;
-            --color-danger: #fa383e;
-            --color-danger-hover: #e0282e;
-            --color-text: #1c1e21;
-            --color-text-secondary: #65676b;
-            --color-border: #dddfe2;
-            --color-success: #42b72a;
-            --color-warn: #f5a623;
-            --color-info: #1877f2;
+            --color-bg: #f0f2f5; --color-surface: #ffffff; --color-primary: #1877f2;
+            --color-primary-hover: #166fe5; --color-danger: #fa383e; --color-danger-hover: #e0282e;
+            --color-text: #1c1e21; --color-text-secondary: #65676b; --color-border: #dddfe2;
+            --color-success: #42b72a; --color-warn: #f5a623; --color-info: #50b1f5;
         }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: var(--color-bg);
-            margin: 0;
-            padding: 20px;
-            color: var(--color-text);
+            display: flex; flex-direction: column; align-items: center; background-color: var(--color-bg);
+            margin: 0; padding: 20px; color: var(--color-text);
         }
-
         .card {
-            background-color: var(--color-surface);
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 700px;
-            margin-bottom: 25px;
-            padding: 25px;
-            box-sizing: border-box;
+            background-color: var(--color-surface); border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 800px;
+            margin-bottom: 25px; padding: 25px; box-sizing: border-box;
         }
-
         h1, h2 {
-            margin-top: 0;
-            border-bottom: 1px solid var(--color-border);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
+            margin-top: 0; border-bottom: 1px solid var(--color-border);
+            padding-bottom: 10px; margin-bottom: 20px;
         }
-        
-        h1 { font-size: 24px; }
-        h2 { font-size: 20px; }
-
+        h1 { font-size: 24px; } h2 { font-size: 20px; }
         .status-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-            text-align: center;
+            display: grid; grid-template-columns: 1fr 1fr 1fr; /* Tres columnas para el nuevo dashboard */
+            gap: 20px; margin-bottom: 20px; text-align: center;
         }
-
-        .status-box {
-            background-color: var(--color-bg);
-            padding: 15px;
-            border-radius: 8px;
-        }
-        .status-box .label {
-            font-size: 14px;
-            color: var(--color-text-secondary);
-            margin-bottom: 5px;
-        }
-        .status-box .value {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .status-indicator {
-            padding: 5px 10px;
-            border-radius: 15px;
-            color: white;
-            font-size: 16px;
-            font-weight: 500;
-        }
-        .status-indicator.libre { background-color: var(--color-success); }
-        .status-indicator.ocupado { background-color: var(--color-warn); }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: var(--color-text-secondary);
-        }
-
+        .status-box { background-color: var(--color-bg); padding: 15px; border-radius: 8px; }
+        .status-box .label { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 5px; }
+        .status-box .value { font-size: 28px; font-weight: bold; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--color-text-secondary); }
         input[type="text"], input[type="file"] {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 15px;
-            border: 1px solid var(--color-border);
-            border-radius: 6px;
-            font-size: 16px;
-            box-sizing: border-box;
+            width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid var(--color-border);
+            border-radius: 6px; font-size: 16px; box-sizing: border-box;
         }
-
         button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background-color 0.2s;
+            width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 16px;
+            font-weight: bold; cursor: pointer; transition: background-color 0.2s;
         }
-        button:disabled {
-            background-color: #ccd0d5;
-            cursor: not-allowed;
-        }
-        
+        button:disabled { background-color: #ccd0d5; cursor: not-allowed; }
         .primary-btn { background-color: var(--color-primary); color: white; margin-bottom: 15px; }
         .primary-btn:hover:not(:disabled) { background-color: var(--color-primary-hover); }
-        
         .danger-btn { background-color: var(--color-danger); color: white; }
         .danger-btn:hover:not(:disabled) { background-color: var(--color-danger-hover); }
-
         #log-container {
-            background-color: #1c1e21;
-            color: #e4e6eb;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-            font-size: 14px;
-            height: 250px;
-            overflow-y: auto;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
+            background-color: #1c1e21; color: #e4e6eb; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 14px; height: 300px; overflow-y: auto; padding: 15px; border-radius: 8px; margin-top: 20px;
         }
         .log-entry { margin-bottom: 5px; word-break: break-all; }
-        .log-success { color: #33ff33; }
-        .log-error { color: #ff4d4d; }
-        .log-warn { color: #f5a623; }
-        .log-info { color: #50b1f5; }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-        th, td {
-            padding: 12px;
-            border: 1px solid var(--color-border);
-            text-align: left;
-        }
+        .log-success { color: #33ff33; } .log-error { color: #ff4d4d; }
+        .log-warn { color: #f5a623; } .log-info { color: #50b1f5; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; border: 1px solid var(--color-border); text-align: left; }
         th { background-color: var(--color-bg); }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h1>Panel de Control del Bot</h1>
+        <h1>Panel de Control del Enjambre de Bots</h1>
 
+        <!-- NUEVO DASHBOARD DE ESTADO -->
         <div class="status-grid">
             <div class="status-box">
                 <div class="label">Tareas en Cola</div>
                 <div class="value" id="queue-count">0</div>
             </div>
             <div class="status-box">
-                <div class="label">Estado del Procesador</div>
-                <div class="value">
-                    <span id="processor-status" class="status-indicator libre">Libre</span>
-                </div>
+                <div class="label">Trabajadores Libres</div>
+                <div class="value" id="available-workers-count" style="color: var(--color-success);">0</div>
+            </div>
+            <div class="status-box">
+                <div class="label">Conversaciones Activas</div>
+                <div class="value" id="active-conversations-count" style="color: var(--color-warn);">0</div>
             </div>
         </div>
 
         <form id="zip-form">
-            <label for="destinationNumber">Número de Destino (con código de país, sin +)</label>
+            <label for="destinationNumber">Número de Destino Único (con código de país, sin +)</label>
             <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
-            
             <label for="zipFile">Archivo ZIP con Imágenes</label>
             <input type="file" id="zipFile" name="zipFile" accept=".zip" required>
-            
-            <button type="submit" id="submitButton" class="primary-btn">Subir y Encolar Tareas</button>
+            <button type="submit" id="submitButton" class="primary-btn">Subir y Despachar Tareas</button>
         </form>
 
         <h2>Log de Actividad en Tiempo Real</h2>
@@ -186,17 +93,11 @@
     </div>
 
     <div class="card">
-        <h2>Números Confirmados</h2>
+        <h2>Confirmaciones Recibidas</h2>
         <button id="viewConfirmedButton" class="primary-btn">Actualizar Lista</button>
-        <button id="clearDbButton" class="danger-btn">Limpiar Lista de Confirmados</button>
+        <button id="clearDbButton" class="danger-btn">Limpiar Lista de Confirmaciones</button>
         <table>
-            <thead>
-                <tr>
-                    <th>Número</th>
-                    <th>Cédula</th>
-                    <th>Fecha de Confirmación</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Número</th><th>Cédula</th><th>Fecha de Confirmación</th></tr></thead>
             <tbody id="confirmedTableBody"></tbody>
         </table>
     </div>
@@ -213,37 +114,29 @@
         const clearDbButton = document.getElementById('clearDbButton');
         const confirmedTableBody = document.getElementById('confirmedTableBody');
         const queueCount = document.getElementById('queue-count');
-        const processorStatus = document.getElementById('processor-status');
+        // NUEVOS SELECTORES PARA EL DASHBOARD
+        const availableWorkersCount = document.getElementById('available-workers-count');
+        const activeConversationsCount = document.getElementById('active-conversations-count');
 
-        // --- Función para añadir Logs ---
         function addLog(message) {
             const entry = document.createElement('div');
             entry.className = `log-entry ${message.type || 'log-info'}`;
             const timestamp = new Date().toLocaleTimeString('es-ES');
             entry.innerHTML = `<span>[${timestamp}]</span> ${message.text}`;
             logContainer.appendChild(entry);
-            logContainer.scrollTop = logContainer.scrollHeight; // Auto-scroll
+            logContainer.scrollTop = logContainer.scrollHeight;
         }
 
-        // --- Lógica del Formulario ---
+        // --- Lógica del Formulario (sin cambios) ---
         zipForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(zipForm);
-            
-            if (!formData.get('zipFile').name) {
-                addLog({ text: 'Por favor, selecciona un archivo ZIP.', type: 'log-error' });
-                return;
-            }
-
+            if (!formData.get('zipFile').name) return addLog({ text: 'Por favor, selecciona un archivo ZIP.', type: 'log-error' });
             submitButton.disabled = true;
             submitButton.textContent = 'Subiendo...';
             addLog({ text: 'Subiendo y procesando archivo ZIP...', type: 'log-info' });
-
             try {
-                const response = await fetch('/subir-zip', {
-                    method: 'POST',
-                    body: formData,
-                });
+                const response = await fetch('/subir-zip', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.message);
                 addLog({ text: `✅ ${result.message}`, type: 'log-success' });
@@ -252,18 +145,17 @@
                 addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' });
             } finally {
                 submitButton.disabled = false;
-                submitButton.textContent = 'Subir y Encolar Tareas';
+                submitButton.textContent = 'Subir y Despachar Tareas';
             }
         });
 
-        // --- Lógica de los Botones de la Tabla ---
+        // --- Lógica de los Botones (sin cambios) ---
         viewConfirmedButton.addEventListener('click', () => {
             socket.emit('ver-confirmados');
             addLog({ text: 'Solicitando lista actualizada de confirmados...', type: 'log-info' });
         });
-
         clearDbButton.addEventListener('click', () => {
-            if (confirm("¿Estás seguro de que quieres borrar TODA la lista de confirmados? Esta acción no se puede deshacer.")) {
+            if (confirm("¿Estás seguro de que quieres borrar TODA la lista de confirmaciones?")) {
                 socket.emit('limpiar-confirmados');
             }
         });
@@ -271,27 +163,20 @@
         // --- Escuchas de Eventos de Socket.IO ---
         socket.on('connect', () => {
             addLog({ text: 'Conectado al servidor.', type: 'log-success' });
-            socket.emit('ver-confirmados'); // Pedir datos al conectar
+            socket.emit('ver-confirmados');
         });
 
         socket.on('queue-update', (size) => {
             queueCount.textContent = size;
         });
 
-        socket.on('status-update', (message) => {
-            addLog(message);
-            // Actualizar el estado del procesador basado en los mensajes clave
-            if (message.text.includes('▶️ Procesando envío')) {
-                processorStatus.textContent = 'Ocupado';
-                processorStatus.className = 'status-indicator ocupado';
-            } else if (message.text.includes('⏳ Secuencia enviada. Esperando respuesta')) {
-                 processorStatus.textContent = 'En Pausa';
-                 processorStatus.className = 'status-indicator ocupado';
-            } else if (message.text.includes('🟢 Proceso liberado') || message.text.includes('¡TIMEOUT!')) {
-                processorStatus.textContent = 'Libre';
-                processorStatus.className = 'status-indicator libre';
-            }
+        // NUEVO LISTENER PARA EL ESTADO DE LOS TRABAJADORES
+        socket.on('workers-status-update', (data) => {
+            availableWorkersCount.textContent = data.available;
+            activeConversationsCount.textContent = data.active;
         });
+
+        socket.on('status-update', addLog);
 
         socket.on('datos-confirmados', (data) => {
             confirmedTableBody.innerHTML = '';
@@ -302,22 +187,15 @@
             data.forEach(row => {
                 const tr = document.createElement('tr');
                 const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'medium' });
-                tr.innerHTML = `
-                    <td>${row.numero_confirmado}</td>
-                    <td>${row.mensaje_confirmacion}</td>
-                    <td>${formattedDate}</td>
-                `;
+                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
                 confirmedTableBody.appendChild(tr);
             });
-            addLog({ text: `Tabla de confirmados actualizada con ${data.length} registros.`, type: 'log-info' });
+            addLog({ text: `Tabla de confirmaciones actualizada con ${data.length} registros.`, type: 'log-info' });
         });
-
+        
         socket.on('disconnect', () => {
             addLog({ text: 'Desconectado del servidor. Intentando reconectar...', type: 'log-error' });
-            processorStatus.textContent = 'Desconocido';
-            processorStatus.className = 'status-indicator';
         });
-
     </script>
 </body>
 </html>
