@@ -10,8 +10,8 @@ const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 
 // --- CONFIGURACIÓN DINÁMICA DE REMITENTES ---
-const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_ID ? process.env.PHONE_NUMBER_ID.split(',') : [];
-const WHATSAPP_TOKENS = process.env.WHATSAPP_TOKEN ? process.env.WHATSAPP_TOKEN.split(',') : [];
+const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_IDS ? process.env.PHONE_NUMBER_IDS.split(',') : [];
+const WHATSAPP_TOKENS = process.env.WHATSAPP_TOKENS ? process.env.WHATSAPP_TOKENS.split(',') : [];
 const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
@@ -64,8 +64,27 @@ io.on('connection', (socket) => {
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
-    socket.on('ver-confirmados', async () => { /* ... (código sin cambios) */ });
-    socket.on('limpiar-confirmados', async () => { /* ... (código sin cambios) */ });
+
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            socket.emit('datos-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener confirmados:", dbError);
+        }
+    });
+
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('DELETE FROM confirmados');
+            console.log("[DB] Tabla 'confirmados' limpiada.");
+            io.emit('datos-confirmados', []);
+            socket.emit('status-update', { text: "✅ DB de confirmados limpiada.", isError: false, isComplete: true });
+        } catch (dbError) {
+            console.error("Error al limpiar confirmados:", dbError);
+            socket.emit('status-update', { text: "❌ Error al limpiar la DB.", isError: true, isComplete: true });
+        }
+    });
 });
 
 // --- ENDPOINTS ---
@@ -73,12 +92,57 @@ app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html'))
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/', (req, res) => res.send('Servidor activo. Visita /panel para usar el control.'));
 
-// WEBHOOK PASIVO
-app.post('/webhook', async (req, res) => { /* ... (código sin cambios) */ });
+// WEBHOOK PASIVO: SÓLO ESCUCHA CONFIRMACIONES
+app.post('/webhook', async (req, res) => {
+    res.sendStatus(200);
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!message || message.type !== 'text') return;
+
+    const from = message.from;
+    const textBody = message.text.body.trim();
+
+    if (/^confirmado\s+\d{8}$/i.test(textBody)) {
+        const cedula = textBody.split(/\s+/)[1];
+        logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
+        try {
+            await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
+            io.emit('ver-confirmados');
+        } catch (dbError) {
+            logAndEmit(`[Confirmación Pasiva] ❌ Error al guardar en DB.`, 'log-error');
+        }
+    }
+});
 
 // ENDPOINT PARA SUBIR EL ZIP
-app.post('/subir-zip', async (req, res) => { /* ... (código sin cambios) */ });
-
+app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
+    const { destinationNumber } = req.body;
+    const zipFile = req.file;
+    if (!destinationNumber || !zipFile) {
+        return res.status(400).json({ message: "Faltan datos." });
+    }
+    const zipFilePath = zipFile.path;
+    try {
+        const zip = new AdmZip(zipFilePath);
+        const imageFiles = zip.getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName)).map(e => e.entryName);
+        if (imageFiles.length === 0) {
+            return res.status(400).json({ message: "El ZIP no contiene imágenes válidas (jpg, jpeg, png)." });
+        }
+        const newTasks = imageFiles.map(imageName => ({ recipientNumber: destinationNumber, imageName }));
+        taskQueue.push(...newTasks);
+        logAndEmit(`📦 Se agregaron ${newTasks.length} tareas. Total en cola: ${taskQueue.length}`, 'log-info');
+        io.emit('queue-update', taskQueue.length);
+        processQueue();
+        res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos.` });
+    } catch (error) {
+        console.error("Error procesando el ZIP:", error);
+        logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
+        res.status(500).json({ message: "Error interno al procesar el archivo ZIP." });
+    } finally {
+        fs.unlink(zipFilePath, (err) => {
+            if (err) console.error("No se pudo eliminar el ZIP temporal:", err);
+        });
+    }
+});
 
 // --- LÓGICA DE PROCESAMIENTO "DISPARA Y OLVIDA" ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -128,13 +192,10 @@ async function executeSendSequence(task, workerIndex) {
         await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2 AND remitente_usado = $3', ['fallido', imageName, sender.id]);
     } finally {
         releaseWorkerAndContinue(workerIndex);
-        
-        // CAMBIO 1: AUMENTAMOS EL TIEMPO DE ESPERA ANTES DE BORRAR
         const imagePath = path.join(UPLOADS_DIR, imageName);
         setTimeout(() => {
             fs.unlink(imagePath, (err) => {
                 if (err) {
-                    // Ignoramos el error si el archivo ya no existe, pero logueamos otros errores
                     if (err.code !== 'ENOENT') {
                         console.error(`Error al intentar borrar ${imageName}:`, err);
                     }
@@ -142,21 +203,18 @@ async function executeSendSequence(task, workerIndex) {
                     logAndEmit(`🗑️ Archivo ${imageName} eliminado.`, 'log-info');
                 }
             });
-        }, 1800000); // 30 minutos (60000 ms * 30)
+        }, 1800000); // 30 minutos
     }
 }
 
-// CAMBIO 2: NUEVA FUNCIÓN "RECOLECTOR DE BASURA"
 function cleanupOldFiles() {
     const uploadsPath = UPLOADS_DIR;
     const maxAge = 3600 * 1000; // 1 hora en milisegundos
-
     fs.readdir(uploadsPath, (err, files) => {
         if (err) {
             console.error("Error al leer el directorio de uploads para limpiar:", err);
             return;
         }
-
         files.forEach(file => {
             const filePath = path.join(uploadsPath, file);
             fs.stat(filePath, (err, stats) => {
@@ -183,7 +241,5 @@ function cleanupOldFiles() {
 server.listen(PORT, async () => {
     console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo para enviar.`);
     await initializeDatabase();
-    
-    // CAMBIO 3: EJECUTAMOS LA LIMPIEZA AL INICIAR
     cleanupOldFiles();
 });
