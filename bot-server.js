@@ -246,7 +246,9 @@ async function startSequence(task, workerIndex) {
 
         logAndEmit(`[Worker ${workerIndex}] ⏳ Esperando respuesta al mensaje ${messageId}...`, 'log-info');
     } catch (error) {
-        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló el envío del template.`, 'log-error');
+        // Extraemos el mensaje de error específico que nos da la API de Meta
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló el envío del template. Razón: ${errorMessage}`, 'log-error');
         releaseAndContinue(workerIndex);
     }
 }
