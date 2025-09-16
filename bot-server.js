@@ -10,8 +10,8 @@ const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 
 // --- CONFIGURACIÓN DINÁMICA DE REMITENTES ---
-const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_IDS ? process.env.PHONE_NUMBER_IDS.split(',') : [];
-const WHATSAPP_TOKENS = process.env.WHATSAPP_TOKENS ? process.env.WHATSAPP_TOKENS.split(',') : [];
+const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_ID ? process.env.PHONE_NUMBER_ID.split(',') : [];
+const WHATSAPP_TOKENS = process.env.WHATSAPP_TOKEN ? process.env.WHATSAPP_TOKEN.split(',') : [];
 const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
