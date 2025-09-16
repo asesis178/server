@@ -32,11 +32,11 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 const upload = multer({ dest: TEMP_DIR });
 
-// --- ESTADO GLOBAL MEJORADO ---
+// --- ESTADO GLOBAL ---
 let taskQueue = [];
 let isProcessing = false;
 let currentTask = null;
-let currentTaskState = null; // 'AWAITING_INITIAL_REPLY' o 'AWAITING_CONFIRMATION'
+let currentTaskState = null;
 let responseTimeout = null;
 
 // --- FUNCIÓN DE LOGGING ---
@@ -53,10 +53,12 @@ async function initializeDatabase() {
             id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255),
             estado VARCHAR(50) DEFAULT 'enviado', creado_en TIMESTAMPTZ DEFAULT NOW()
         );`);
+        // CORRECCIÓN SUTIL PERO IMPORTANTE EN LA ESTRUCTURA DE LA TABLA
         await client.query(`CREATE TABLE IF NOT EXISTS confirmados (
-            id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL,
-            mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(numero_confirmado, mensaje_confirmacion)
+            id SERIAL PRIMARY KEY,
+            numero_confirmado VARCHAR(255) NOT NULL UNIQUE, 
+            mensaje_confirmacion VARCHAR(255),
+            confirmado_en TIMESTAMPTZ DEFAULT NOW()
         );`);
         console.log("✅ Tablas 'envios' y 'confirmados' verificadas.");
     } catch (err) {
@@ -118,18 +120,23 @@ app.post('/webhook', async (req, res) => {
         await continueSequenceAfterInitialReply();
     }
     else if (currentTaskState === 'AWAITING_CONFIRMATION') {
-        if (/^confirmado\s+\d{8}$/i.test(textBody)) { // El flag /i hace que sea case-insensitive
+        if (/^confirmado\s+\d{8}$/i.test(textBody)) {
             const cedula = textBody.split(/\s+/)[1];
             logAndEmit(`✅ Confirmación VÁLIDA de ${from} con cédula: ${cedula}`, 'log-success');
             try {
+                // ===== LA CORRECCIÓN ESTÁ AQUÍ =====
                 await pool.query(
-                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2) ON CONFLICT (numero_confirmado, mensaje_confirmacion) DO NOTHING`,
+                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)
+                     ON CONFLICT (numero_confirmado) 
+                     DO UPDATE SET mensaje_confirmacion = EXCLUDED.mensaje_confirmacion, confirmado_en = NOW()`,
                     [from, cedula]
                 );
                 const result = await pool.query('SELECT * FROM confirmados ORDER BY confirmado_en DESC');
                 io.emit('datos-confirmados', result.rows);
             } catch (dbError) {
-                logAndEmit(`❌ Error al guardar en DB la confirmación de ${from}.`, 'log-error');
+                // Añadimos más detalle al log de error para futuras depuraciones
+                console.error("Error al guardar en la DB:", dbError);
+                logAndEmit(`❌ Error al guardar en DB la confirmación de ${from}. Revisa los logs del servidor.`, 'log-error');
             }
         } else {
             logAndEmit(`❌ Respuesta no es una confirmación válida: "${textBody}".`, 'log-warn');
