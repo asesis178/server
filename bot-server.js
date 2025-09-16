@@ -124,12 +124,18 @@ app.post('/webhook', async (req, res) => {
             const cedula = textBody.split(/\s+/)[1];
             logAndEmit(`✅ Confirmación VÁLIDA de ${from} con cédula: ${cedula}`, 'log-success');
           // ...
-            try {
-                // ===== EL CAMBIO PARA PERMITIR DUPLICADOS ESTÁ AQUÍ =====
+               try {
                 await pool.query(
                     `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`,
                     [from, cedula]
                 );
+
+                // --- ¡ESTA ES LA LÍNEA MÁGICA QUE AÑADIMOS! ---
+                // 1. Obtenemos la lista fresca y ordenada de la DB
+                const result = await pool.query('SELECT * FROM confirmados ORDER BY confirmado_en DESC');
+                // 2. La enviamos a TODOS los paneles conectados
+                io.emit('datos-confirmados', result.rows);
+                
             }catch (dbError) {
                 // Añadimos más detalle al log de error para futuras depuraciones
                 console.error("Error al guardar en la DB:", dbError);
