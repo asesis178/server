@@ -56,7 +56,7 @@ async function initializeDatabase() {
         // CORRECCIÓN SUTIL PERO IMPORTANTE EN LA ESTRUCTURA DE LA TABLA
         await client.query(`CREATE TABLE IF NOT EXISTS confirmados (
             id SERIAL PRIMARY KEY,
-            numero_confirmado VARCHAR(255) NOT NULL UNIQUE, 
+            numero_confirmado VARCHAR(255) NOT NULL , 
             mensaje_confirmacion VARCHAR(255),
             confirmado_en TIMESTAMPTZ DEFAULT NOW()
         );`);
@@ -123,17 +123,14 @@ app.post('/webhook', async (req, res) => {
         if (/^confirmado\s+\d{8}$/i.test(textBody)) {
             const cedula = textBody.split(/\s+/)[1];
             logAndEmit(`✅ Confirmación VÁLIDA de ${from} con cédula: ${cedula}`, 'log-success');
+          // ...
             try {
-                // ===== LA CORRECCIÓN ESTÁ AQUÍ =====
+                // ===== EL CAMBIO PARA PERMITIR DUPLICADOS ESTÁ AQUÍ =====
                 await pool.query(
-                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)
-                     ON CONFLICT (numero_confirmado) 
-                     DO UPDATE SET mensaje_confirmacion = EXCLUDED.mensaje_confirmacion, confirmado_en = NOW()`,
+                    `INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`,
                     [from, cedula]
                 );
-                const result = await pool.query('SELECT * FROM confirmados ORDER BY confirmado_en DESC');
-                io.emit('datos-confirmados', result.rows);
-            } catch (dbError) {
+            }catch (dbError) {
                 // Añadimos más detalle al log de error para futuras depuraciones
                 console.error("Error al guardar en la DB:", dbError);
                 logAndEmit(`❌ Error al guardar en DB la confirmación de ${from}. Revisa los logs del servidor.`, 'log-error');
