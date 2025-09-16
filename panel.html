@@ -64,6 +64,7 @@
     <div class="card">
         <h1>Panel de Control del Enjambre de Bots</h1>
 
+        <!-- DASHBOARD DE ESTADO ACTUALIZADO -->
         <div class="status-grid">
             <div class="status-box">
                 <div class="label">Tareas en Cola</div>
@@ -115,8 +116,6 @@
         const queueCount = document.getElementById('queue-count');
         const availableWorkersCount = document.getElementById('available-workers-count');
         const activeWorkersCount = document.getElementById('active-workers-count');
-        
-        // --- Selectores de los inputs del formulario ---
         const destinationNumberInput = document.getElementById('destinationNumber');
         const zipFileInput = document.getElementById('zipFile');
 
@@ -129,21 +128,13 @@
             logContainer.scrollTop = logContainer.scrollHeight;
         }
 
-        // --- Lógica del Formulario con VALIDACIÓN MEJORADA ---
+        // --- Lógica del Formulario ---
         zipForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-
-            // ===== ¡ESTA ES LA NUEVA VALIDACIÓN! =====
             const destinationNumber = destinationNumberInput.value.trim();
             const zipFile = zipFileInput.files[0];
-
-            if (!destinationNumber) {
-                return addLog({ text: '❌ Error: Debes ingresar un número de destino.', type: 'log-error' });
-            }
-            if (!zipFile) {
-                return addLog({ text: '❌ Error: Debes seleccionar un archivo ZIP.', type: 'log-error' });
-            }
-            // ==========================================
+            if (!destinationNumber) return addLog({ text: '❌ Error: Debes ingresar un número de destino.', type: 'log-error' });
+            if (!zipFile) return addLog({ text: '❌ Error: Debes seleccionar un archivo ZIP.', type: 'log-error' });
 
             const formData = new FormData();
             formData.append('destinationNumber', destinationNumber);
@@ -152,7 +143,6 @@
             submitButton.disabled = true;
             submitButton.textContent = 'Subiendo...';
             addLog({ text: 'Subiendo y procesando archivo ZIP...', type: 'log-info' });
-
             try {
                 const response = await fetch('/subir-zip', { method: 'POST', body: formData });
                 const result = await response.json();
@@ -168,5 +158,52 @@
         });
 
         // --- Lógica de los Botones ---
-        viewConfirmedButton.addEventListener('click', () => { /* sin cambios */ });
-        clearDbButton.addEventListene
+        viewConfirmedButton.addEventListener('click', () => {
+            socket.emit('ver-confirmados');
+            addLog({ text: 'Solicitando lista actualizada de confirmados...', type: 'log-info' });
+        });
+        clearDbButton.addEventListener('click', () => {
+            if (confirm("¿Estás seguro de que quieres borrar TODA la lista de confirmaciones?")) {
+                socket.emit('limpiar-confirmados');
+            }
+        });
+
+        // --- Escuchas de Eventos de Socket.IO ---
+        socket.on('connect', () => {
+            addLog({ text: 'Conectado al servidor.', type: 'log-success' });
+            socket.emit('ver-confirmados');
+        });
+
+        socket.on('queue-update', (size) => {
+            queueCount.textContent = size;
+        });
+
+        // LISTENER ACTUALIZADO PARA EL DASHBOARD
+        socket.on('workers-status-update', (data) => {
+            availableWorkersCount.textContent = data.available;
+            activeWorkersCount.textContent = data.active;
+        });
+
+        socket.on('status-update', addLog);
+
+        socket.on('datos-confirmados', (data) => {
+            confirmedTableBody.innerHTML = '';
+            if (!data || data.length === 0) {
+                confirmedTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No hay confirmaciones.</td></tr>';
+                return;
+            }
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'medium' });
+                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
+                confirmedTableBody.appendChild(tr);
+            });
+            addLog({ text: `Tabla de confirmaciones actualizada.`, type: 'log-info' });
+        });
+        
+        socket.on('disconnect', () => {
+            addLog({ text: 'Desconectado del servidor.', type: 'log-error' });
+        });
+    </script>
+</body>
+</html>

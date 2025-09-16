@@ -64,8 +64,27 @@ io.on('connection', (socket) => {
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
-    socket.on('ver-confirmados', async () => { /* ... */ });
-    socket.on('limpiar-confirmados', async () => { /* ... */ });
+
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            socket.emit('datos-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener confirmados:", dbError);
+        }
+    });
+
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('DELETE FROM confirmados');
+            console.log("[DB] Tabla 'confirmados' limpiada.");
+            io.emit('datos-confirmados', []);
+            socket.emit('status-update', { text: "✅ DB de confirmados limpiada.", isError: false, isComplete: true });
+        } catch (dbError) {
+            console.error("Error al limpiar confirmados:", dbError);
+            socket.emit('status-update', { text: "❌ Error al limpiar la DB.", isError: true, isComplete: true });
+        }
+    });
 });
 
 // --- ENDPOINTS ---
@@ -87,7 +106,7 @@ app.post('/webhook', async (req, res) => {
         logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
         try {
             await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
-            io.emit('ver-confirmados'); // Avisa al frontend para que actualice la tabla
+            io.emit('ver-confirmados');
         } catch (dbError) {
             logAndEmit(`[Confirmación Pasiva] ❌ Error al guardar en DB.`, 'log-error');
         }
@@ -95,23 +114,33 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ENDPOINT PARA SUBIR EL ZIP
-app.post('/subir-zip', async (req, res) => {
+app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
     const { destinationNumber } = req.body;
     const zipFile = req.file;
-    if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
+    if (!destinationNumber || !zipFile) {
+        return res.status(400).json({ message: "Faltan datos." });
+    }
+    const zipFilePath = zipFile.path;
     try {
-        const imageFiles = new AdmZip(zipFile.path).getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName)).map(e => e.entryName);
-        if (imageFiles.length === 0) return res.status(400).json({ message: "El ZIP no contiene imágenes." });
+        const zip = new AdmZip(zipFilePath);
+        const imageFiles = zip.getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName)).map(e => e.entryName);
+        if (imageFiles.length === 0) {
+            return res.status(400).json({ message: "El ZIP no contiene imágenes válidas (jpg, jpeg, png)." });
+        }
         const newTasks = imageFiles.map(imageName => ({ recipientNumber: destinationNumber, imageName }));
         taskQueue.push(...newTasks);
         logAndEmit(`📦 Se agregaron ${newTasks.length} tareas. Total en cola: ${taskQueue.length}`, 'log-info');
         io.emit('queue-update', taskQueue.length);
-        processQueue(); // Despertar al despachador
+        processQueue();
         res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos.` });
     } catch (error) {
-        res.status(500).json({ message: "Error al procesar el ZIP." });
+        console.error("Error procesando el ZIP:", error);
+        logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
+        res.status(500).json({ message: "Error interno al procesar el archivo ZIP." });
     } finally {
-        fs.unlink(zipFile.path, () => {});
+        fs.unlink(zipFilePath, (err) => {
+            if (err) console.error("No se pudo eliminar el ZIP temporal:", err);
+        });
     }
 });
 
@@ -119,27 +148,22 @@ app.post('/subir-zip', async (req, res) => {
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function releaseWorkerAndContinue(workerIndex) {
-    availableWorkers.add(workerIndex); // Devolver el trabajador al pool de disponibles
+    availableWorkers.add(workerIndex);
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     logAndEmit(`🟢 [Worker ${workerIndex}] liberado. Libres: ${availableWorkers.size}.`, 'log-info');
     io.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
-    setTimeout(processQueue, 500); // Intentar despachar una nueva tarea
+    setTimeout(processQueue, 500);
 }
 
 async function processQueue() {
-    // Mientras haya trabajadores libres Y tareas en la cola
     while (availableWorkers.size > 0 && taskQueue.length > 0) {
         const workerIndex = availableWorkers.values().next().value;
-        availableWorkers.delete(workerIndex); // Marcar como ocupado
-
+        availableWorkers.delete(workerIndex);
         const activeWorkersCount = senderPool.length - availableWorkers.size;
         io.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
-
         const task = taskQueue.shift();
         io.emit('queue-update', taskQueue.length);
-
         logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea para ${task.recipientNumber} con ${task.imageName}.`, 'log-info');
-        // Iniciar la secuencia sin esperar (sin await). El bucle continúa para despachar más tareas.
         executeSendSequence(task, workerIndex);
     }
 }
@@ -149,38 +173,24 @@ async function executeSendSequence(task, workerIndex) {
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
     const { recipientNumber, imageName } = task;
-
     try {
         await pool.query('INSERT INTO envios (numero_destino, nombre_imagen, remitente_usado, estado) VALUES ($1, $2, $3, $4)', [recipientNumber, imageName, sender.id, 'procesando']);
-        
-        // 1. Template
         logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando Template...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
-        
-        // 2. Pausa de 10 segundos
         await delay(10000);
-        
-        // 3. Texto "3"
         logAndEmit(`[Worker ${workerIndex}] 📤 2/3: Enviando "3"...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
-
-        // 4. Pausa de 2 segundos
         await delay(2000);
-        
-        // 5. Imagen
         const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageName}`;
         logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen ${imageName}...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
-
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para ${imageName}.`, 'log-success');
         await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2 AND remitente_usado = $3', ['enviado', imageName, sender.id]);
-
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para ${imageName}. Razón: ${errorMessage}`, 'log-error');
         await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2 AND remitente_usado = $3', ['fallido', imageName, sender.id]);
     } finally {
-        // Al terminar (con éxito o error), el trabajador se libera y se intenta procesar la siguiente tarea.
         releaseWorkerAndContinue(workerIndex);
         const imagePath = path.join(UPLOADS_DIR, imageName);
         setTimeout(() => fs.unlink(imagePath, () => {}), 60000 * 10);
