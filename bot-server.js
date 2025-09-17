@@ -261,7 +261,7 @@ async function executeActivationSequence(workerIndex, recipientNumber) {
         await delay(2000);
         logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen de activación...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
-        
+        await delay(5000);
         await pool.query(
             `INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW())
              ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`,
