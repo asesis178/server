@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Control - Bot Avanzado</title>
     <style>
-        /* (El CSS es el mismo de la versión anterior, no es necesario cambiarlo) */
         :root {
             --color-bg: #f0f2f5; --color-surface: #ffffff; --color-primary: #1877f2;
             --color-primary-hover: #166fe5; --color-danger: #fa383e; --color-danger-hover: #e0282e;
@@ -69,20 +68,17 @@
             <div class="status-box"><div class="label">Trabajadores Ocupados</div><div class="value" id="active-workers-count" style="color: var(--color-warn);">0</div></div>
         </div>
 
-        <!-- NUEVO FORMULARIO DE ACTIVACIÓN -->
-        <h2>Activar Ventana de Conversación (24h)</h2>
+        <h2>Activación Manual de Conversación (24h)</h2>
         <form id="activation-form">
             <label for="activationNumber">Número de Destino a Activar</label>
             <input type="text" id="activationNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
-            <label for="activationImage">Imagen Específica de Activación</label>
-            <input type="file" id="activationImage" name="activationImage" accept="image/jpeg,image/png" required>
-            <button type="submit" id="activationButton" class="primary-btn" style="background-color: var(--color-warn);">Iniciar Conversación de Pago</button>
+            <button type="submit" id="activationButton" class="primary-btn" style="background-color: var(--color-warn);">Activar Ventana de 24h</button>
         </form>
         <hr>
 
-        <h2>Envío Masivo (Dentro de la ventana de 24h)</h2>
+        <h2>Envío Masivo (Gratuito si la ventana está activa)</h2>
         <form id="zip-form">
-            <label for="destinationNumber">Número de Destino (debe estar activado)</label>
+            <label for="destinationNumber">Número de Destino</label>
             <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
             <label for="zipFile">Archivo ZIP con Imágenes</label>
             <input type="file" id="zipFile" name="zipFile" accept=".zip" required>
@@ -127,14 +123,14 @@
         activationForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(activationForm);
-            if (!formData.get('destinationNumber') || !formData.get('activationImage').name) {
-                return addLog({ text: '❌ Error: Completa todos los campos para activar.', type: 'log-error' });
+            if (!formData.get('destinationNumber')) {
+                return addLog({ text: '❌ Error: Ingresa un número para activar.', type: 'log-error' });
             }
             activationButton.disabled = true;
             activationButton.textContent = 'Activando...';
-            addLog({ text: 'Iniciando secuencia de activación de pago...', type: 'log-info' });
+            addLog({ text: 'Iniciando secuencia de activación manual...', type: 'log-info' });
             try {
-                const response = await fetch('/activar-conversacion', { method: 'POST', body: formData });
+                const response = await fetch('/manual-activate', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.message);
                 addLog({ text: `✅ ${result.message}`, type: 'log-success' });
@@ -143,7 +139,7 @@
                 addLog({ text: `❌ Error en la activación: ${error.message}`, type: 'log-error' });
             } finally {
                 activationButton.disabled = false;
-                activationButton.textContent = 'Iniciar Conversación de Pago';
+                activationButton.textContent = 'Activar Ventana de 24h';
             }
         });
 
@@ -173,15 +169,28 @@
             }
         });
         
-        // --- Escuchas de Socket.IO y otros botones (sin cambios) ---
-        socket.on('connect', () => { /* ... */ });
+        // --- Escuchas de Socket.IO y otros botones ---
+        socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
         socket.on('workers-status-update', (data) => {
             availableWorkersCount.textContent = data.available;
             activeWorkersCount.textContent = data.active;
         });
         socket.on('status-update', addLog);
-        socket.on('datos-confirmados', (data) => { /* ... */ });
+        socket.on('datos-confirmados', (data) => {
+            confirmedTableBody.innerHTML = '';
+            if (!data || data.length === 0) {
+                confirmedTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No hay confirmaciones.</td></tr>';
+                return;
+            }
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'medium' });
+                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
+                confirmedTableBody.appendChild(tr);
+            });
+            addLog({ text: `Tabla de confirmaciones actualizada.`, type: 'log-info' });
+        });
         document.getElementById('viewConfirmedButton').addEventListener('click', () => socket.emit('ver-confirmados'));
         document.getElementById('clearDbButton').addEventListener('click', () => { if (confirm("¿Seguro?")) socket.emit('limpiar-confirmados'); });
     </script>

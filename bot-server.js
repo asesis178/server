@@ -16,9 +16,10 @@ const WHATSAPP_TOKENS = process.env.WHATSAPP_TOKEN ? process.env.WHATSAPP_TOKEN.
 const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
 
 if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) {
-    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida.");
+    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida. Asegúrate de que PHONE_NUMBER_ID y WHATSAPP_TOKEN estén definidos.");
     process.exit(1);
 }
 
@@ -31,8 +32,10 @@ app.use(express.json());
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const TEMP_DIR = path.join(__dirname, 'temp');
+const ASSETS_DIR = path.join(__dirname, 'assets');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
 const upload = multer({ dest: TEMP_DIR });
 
 // --- ESTADO GLOBAL ---
@@ -45,18 +48,13 @@ function logAndEmit(text, type = 'log-info') {
     io.emit('status-update', { text, type });
 }
 
-// --- INICIALIZACIÓN DE BASE DE DATOS (CON NUEVA TABLA) ---
+// --- INICIALIZACIÓN DE BASE DE DATOS ---
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
         await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50), creado_en TIMESTPTZ DEFAULT NOW());`);
         await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTPTZ DEFAULT NOW());`);
-        // NUEVA TABLA PARA GESTIONAR LAS VENTANAS DE 24H
-        await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (
-            id SERIAL PRIMARY KEY,
-            recipient_number VARCHAR(255) NOT NULL UNIQUE,
-            last_activation_time TIMESTAMPTZ NOT NULL
-        );`);
+        await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`);
         console.log("✅ Todas las tablas verificadas y listas.");
     } catch (err) {
         console.error("❌ Error al inicializar la base de datos:", err);
@@ -67,7 +65,6 @@ async function initializeDatabase() {
 
 // --- LÓGICA DE SOCKET.IO ---
 io.on('connection', (socket) => {
-    // (Código completo sin abreviar)
     console.log(`[Socket.IO] Usuario conectado: ${socket.id}`);
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     socket.emit('queue-update', taskQueue.length);
@@ -98,11 +95,11 @@ io.on('connection', (socket) => {
 // --- ENDPOINTS ---
 app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
 app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/assets', express.static(ASSETS_DIR));
 app.get('/', (req, res) => res.send('Servidor activo. Visita /panel para usar el control.'));
 
 // WEBHOOK PASIVO
 app.post('/webhook', async (req, res) => {
-    // (Código completo sin abreviar)
     res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message || message.type !== 'text') return;
@@ -122,48 +119,28 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// NUEVO ENDPOINT PARA ACTIVAR LA CONVERSACIÓN
-app.post('/activar-conversacion', upload.single('activationImage'), async (req, res) => {
+// ENDPOINT DE ACTIVACIÓN MANUAL
+app.post('/manual-activate', upload.none(), async (req, res) => {
     const { destinationNumber } = req.body;
-    const imageFile = req.file;
-
-    if (!destinationNumber || !imageFile) {
-        return res.status(400).json({ message: "Faltan datos para la activación." });
-    }
-
-    if (availableWorkers.size === 0) {
-        fs.unlink(imageFile.path, () => {}); // Limpiar la imagen subida
-        return res.status(503).json({ message: "Todos los trabajadores están ocupados. Inténtalo más tarde." });
-    }
+    if (!destinationNumber) return res.status(400).json({ message: "Falta el número de destino." });
+    if (availableWorkers.size === 0) return res.status(503).json({ message: "Todos los trabajadores están ocupados." });
 
     const workerIndex = availableWorkers.values().next().value;
     availableWorkers.delete(workerIndex);
-    const activeWorkersCount = senderPool.length - availableWorkers.size;
-    io.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
+    io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
 
-    logAndEmit(`▶️ [Worker ${workerIndex}] iniciando secuencia de activación para ${destinationNumber}.`, 'log-info');
+    logAndEmit(`▶️ [Worker ${workerIndex}] iniciando activación MANUAL para ${destinationNumber}.`, 'log-info');
     
-    // Optimizamos la imagen de activación
-    const optimizedFileName = `opt-activation-${Date.now()}.jpeg`;
-    const targetPath = path.join(UPLOADS_DIR, optimizedFileName);
-    await sharp(imageFile.path).resize({ width: 1920, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(targetPath);
-    fs.unlink(imageFile.path, () => {}); // Borramos la imagen temporal original
-
-    // Ejecutamos la secuencia en segundo plano para no bloquear la respuesta HTTP
-    executeActivationSequence({ recipientNumber: destinationNumber, imageName: optimizedFileName }, workerIndex);
+    executeActivationSequence(destinationNumber, workerIndex);
     
-    res.status(202).json({ message: "Secuencia de activación iniciada. Revisa el log para ver el progreso." });
+    res.status(202).json({ message: "Secuencia de activación manual iniciada." });
 });
-
 
 // ENDPOINT PARA SUBIR EL ZIP
 app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
-    // (Código completo sin abreviar)
     const { destinationNumber } = req.body;
     const zipFile = req.file;
-    if (!destinationNumber || !zipFile) {
-        return res.status(400).json({ message: "Faltan datos." });
-    }
+    if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
     const zipFilePath = zipFile.path;
     try {
         const zip = new AdmZip(zipFilePath);
@@ -197,7 +174,6 @@ app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
     }
 });
 
-
 // --- LÓGICA DE PROCESAMIENTO ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -213,8 +189,7 @@ async function processQueue() {
     while (availableWorkers.size > 0 && taskQueue.length > 0) {
         const workerIndex = availableWorkers.values().next().value;
         availableWorkers.delete(workerIndex);
-        const activeWorkersCount = senderPool.length - availableWorkers.size;
-        io.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
+        io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
         const task = taskQueue.shift();
         io.emit('queue-update', taskQueue.length);
         logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea para ${task.recipientNumber} con ${task.imageName}.`, 'log-info');
@@ -222,26 +197,26 @@ async function processQueue() {
     }
 }
 
-// SECUENCIA DE ENVÍO MASIVO (GRATUITA)
+// SECUENCIA DE ENVÍO MASIVO (CON LÓGICA DE ACTIVACIÓN AUTOMÁTICA)
 async function executeSendSequence(task, workerIndex) {
+    const { recipientNumber, imageName } = task;
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
-    const { recipientNumber, imageName } = task;
+    
     try {
-        // 1. VERIFICAR SI LA VENTANA DE 24H ESTÁ ABIERTA
         const windowResult = await pool.query('SELECT last_activation_time FROM conversation_windows WHERE recipient_number = $1', [recipientNumber]);
-        if (windowResult.rowCount === 0) {
-            throw new Error(`La ventana de conversación para ${recipientNumber} no está activa. Actívala primero.`);
-        }
-        const lastActivation = new Date(windowResult.rows[0].last_activation_time).getTime();
-        const hoursSinceActivation = (Date.now() - lastActivation) / (1000 * 60 * 60);
+        const isWindowOpen = windowResult.rowCount > 0 && (Date.now() - new Date(windowResult.rows[0].last_activation_time).getTime()) < (24 * 60 * 60 * 1000);
 
-        if (hoursSinceActivation >= 24) {
-            throw new Error(`La ventana de conversación para ${recipientNumber} ha expirado. Reactívala.`);
+        if (!isWindowOpen) {
+            logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana de 24h cerrada para ${recipientNumber}. Iniciando activación automática...`, 'log-warn');
+            taskQueue.unshift(task);
+            io.emit('queue-update', taskQueue.length);
+            await executeActivationSequence(recipientNumber, workerIndex, false);
+            releaseWorkerAndContinue(workerIndex); // Liberamos para que otro worker (o el mismo) retome la tarea
+            return;
         }
 
-        // 2. EJECUTAR LA SECUENCIA GRATUITA
         await pool.query('INSERT INTO envios (numero_destino, nombre_imagen, remitente_usado, estado) VALUES ($1, $2, $3, $4)', [recipientNumber, imageName, sender.id, 'procesando']);
         logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" (gratis)...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS });
@@ -253,55 +228,52 @@ async function executeSendSequence(task, workerIndex) {
         logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen ${imageName}...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para ${imageName}.`, 'log-success');
-        await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2 AND remitente_usado = $3', ['enviado', imageName, sender.id]);
+        await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2', ['enviado', imageName]);
         await delay(5000);
+
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para ${imageName}. Razón: ${errorMessage}`, 'log-error');
-        await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2 AND remitente_usado = $3', ['fallido', imageName, sender.id]);
+        await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2', ['fallido', imageName]);
     } finally {
-        releaseWorkerAndContinue(workerIndex);
+        if (!taskQueue.includes(task)) { // Solo liberamos si no se re-encoló
+            releaseWorkerAndContinue(workerIndex);
+        }
         const imagePath = path.join(UPLOADS_DIR, imageName);
-        setTimeout(() => { fs.unlink(imagePath, () => {}); }, 1800000);
+        setTimeout(() => fs.unlink(imagePath, () => {}), 1800000);
     }
 }
 
-// NUEVA SECUENCIA DE ACTIVACIÓN (DE PAGO)
-async function executeActivationSequence(task, workerIndex) {
+// SECUENCIA DE ACTIVACIÓN (DE PAGO)
+async function executeActivationSequence(recipientNumber, workerIndex) {
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
-    const { recipientNumber, imageName } = task;
+    const publicImageUrl = `${RENDER_EXTERNAL_URL}/assets/${ACTIVATION_IMAGE_NAME}`;
+    
     try {
         logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando Template (pago)...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
-        await delay(2000); // Pausa corta
+        await delay(2000);
         logAndEmit(`[Worker ${workerIndex}] 📤 2/3: Enviando "3"...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
         await delay(2000);
-        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageName}`;
-        logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen de activación ${imageName}...`, 'log-info');
+        logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen de activación...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         
-        // REGISTRAR LA ACTIVACIÓN EXITOSA EN LA DB
         await pool.query(
             `INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW())
              ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`,
             [recipientNumber]
         );
-        logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada/renovada para ${recipientNumber}.`, 'log-success');
+        logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success');
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
-        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia de activación para ${recipientNumber}. Razón: ${errorMessage}`, 'log-error');
-    } finally {
-        releaseWorkerAndContinue(workerIndex);
-        const imagePath = path.join(UPLOADS_DIR, imageName);
-        setTimeout(() => { fs.unlink(imagePath, () => {}); }, 1800000);
+        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia de activación. Razón: ${errorMessage}`, 'log-error');
     }
 }
 
 function cleanupOldFiles() {
-    // (Código completo sin abreviar)
     const maxAge = 3600 * 1000;
     fs.readdir(UPLOADS_DIR, (err, files) => {
         if (err) return console.error("Error al leer directorio para limpiar:", err);
@@ -322,7 +294,7 @@ function cleanupOldFiles() {
 
 // --- INICIO DEL SERVIDOR ---
 server.listen(PORT, async () => {
-    console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo para enviar.`);
+    console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo.`);
     await initializeDatabase();
     cleanupOldFiles();
 });
