@@ -19,7 +19,7 @@ const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost
 const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
 
 if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) {
-    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida. Asegúrate de que PHONE_NUMBER_ID y WHATSAPP_TOKEN estén definidos.");
+    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida.");
     process.exit(1);
 }
 
@@ -52,12 +52,16 @@ function logAndEmit(text, type = 'log-info') {
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
-        await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50), creado_en TIMESTPTZ DEFAULT NOW());`);
-        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTPTZ DEFAULT NOW());`);
+        // CORRECCIÓN: 'timestptz' a 'TIMESTAMPTZ'
+        await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50), creado_en TIMESTAMPTZ DEFAULT NOW());`);
+        // CORRECCIÓN: 'timestptz' a 'TIMESTAMPTZ'
+        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTAMPTZ DEFAULT NOW());`);
+        // CORRECCIÓN: 'timestptz' a 'TIMESTAMPTZ'
         await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`);
         console.log("✅ Todas las tablas verificadas y listas.");
     } catch (err) {
         console.error("❌ Error al inicializar la base de datos:", err);
+        throw err;
     } finally {
         client.release();
     }
@@ -197,7 +201,7 @@ async function processQueue() {
     }
 }
 
-// SECUENCIA DE ENVÍO MASIVO (CON LÓGICA DE ACTIVACIÓN AUTOMÁTICA)
+// SECUENCIA DE ENVÍO MASIVO
 async function executeSendSequence(task, workerIndex) {
     const { recipientNumber, imageName } = task;
     const sender = senderPool[workerIndex];
@@ -212,8 +216,7 @@ async function executeSendSequence(task, workerIndex) {
             logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana de 24h cerrada para ${recipientNumber}. Iniciando activación automática...`, 'log-warn');
             taskQueue.unshift(task);
             io.emit('queue-update', taskQueue.length);
-            await executeActivationSequence(recipientNumber, workerIndex, false);
-            releaseWorkerAndContinue(workerIndex); // Liberamos para que otro worker (o el mismo) retome la tarea
+            await executeActivationSequence(workerIndex, recipientNumber);
             return;
         }
 
@@ -236,16 +239,14 @@ async function executeSendSequence(task, workerIndex) {
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para ${imageName}. Razón: ${errorMessage}`, 'log-error');
         await pool.query('UPDATE envios SET estado = $1 WHERE nombre_imagen = $2', ['fallido', imageName]);
     } finally {
-        if (!taskQueue.includes(task)) { // Solo liberamos si no se re-encoló
-            releaseWorkerAndContinue(workerIndex);
+        if (!taskQueue.some(t => t.imageName === imageName)) {
+             releaseWorkerAndContinue(workerIndex);
         }
-        const imagePath = path.join(UPLOADS_DIR, imageName);
-        setTimeout(() => fs.unlink(imagePath, () => {}), 1800000);
     }
 }
 
-// SECUENCIA DE ACTIVACIÓN (DE PAGO)
-async function executeActivationSequence(recipientNumber, workerIndex) {
+// SECUENCIA DE ACTIVACIÓN
+async function executeActivationSequence(workerIndex, recipientNumber) {
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
@@ -270,22 +271,21 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia de activación. Razón: ${errorMessage}`, 'log-error');
+    } finally {
+        releaseWorkerAndContinue(workerIndex);
     }
 }
 
 function cleanupOldFiles() {
     const maxAge = 3600 * 1000;
     fs.readdir(UPLOADS_DIR, (err, files) => {
-        if (err) return console.error("Error al leer directorio para limpiar:", err);
+        if (err) return;
         files.forEach(file => {
             const filePath = path.join(UPLOADS_DIR, file);
             fs.stat(filePath, (err, stats) => {
                 if (err) return;
                 if (Date.now() - stats.mtime.getTime() > maxAge) {
-                    fs.unlink(filePath, (err) => {
-                        if (err) console.error(`Error al borrar archivo antiguo ${file}:`, err);
-                        else console.log(`🗑️ Recolector: Eliminado archivo antiguo ${file}.`);
-                    });
+                    fs.unlink(filePath, () => {});
                 }
             });
         });
@@ -293,8 +293,19 @@ function cleanupOldFiles() {
 }
 
 // --- INICIO DEL SERVIDOR ---
-server.listen(PORT, async () => {
-    console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo.`);
-    await initializeDatabase();
-    cleanupOldFiles();
-});
+async function startServer() {
+    try {
+        await initializeDatabase();
+        server.listen(PORT, () => {
+            console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo.`);
+            cleanupOldFiles();
+        });
+    } catch (error) {
+        console.error("🔥🔥🔥 FALLO CRÍTICO AL INICIAR EL SERVIDOR 🔥🔥🔥");
+        console.error("No se pudo conectar o inicializar la base de datos.");
+        console.error("Error detallado:", error);
+        process.exit(1);
+    }
+}
+
+startServer();
