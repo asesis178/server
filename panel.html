@@ -66,6 +66,10 @@
             font-size: 14px; height: 300px; overflow-y: auto; padding: 15px; border-radius: 8px; margin-top: 20px;
         }
         .log-entry { margin-bottom: 5px; word-break: break-all; }
+        .log-success { color: #33ff33; }
+        .log-error { color: #ff4d4d; }
+        .log-warn { color: #f5a623; }
+        .log-info { color: #50b1f5; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
         th, td { padding: 12px; border: 1px solid var(--color-border); text-align: left; }
         th { background-color: var(--color-bg); }
@@ -136,6 +140,8 @@
         const confirmedTableBody = document.getElementById('confirmedTableBody');
         const windowStatusIndicator = document.getElementById('window-status-indicator');
         const windowStatusDetails = document.getElementById('window-status-details');
+        const viewConfirmedButton = document.getElementById('viewConfirmedButton');
+        const clearDbButton = document.getElementById('clearDbButton');
 
         function addLog(message) {
             const entry = document.createElement('div');
@@ -147,20 +153,39 @@
         }
 
         function updateWindowStatusUI(data) {
-            windowStatusIndicator.textContent = data.status.replace('_', ' ');
+            windowStatusIndicator.textContent = data.status.replace(/_/g, ' ');
             windowStatusIndicator.className = `status-indicator ${data.status.toLowerCase()}`;
             windowStatusDetails.textContent = data.details || '\xA0'; // \xA0 is a non-breaking space
         }
 
         // --- Lógica de Formularios ---
         const zipForm = document.getElementById('zip-form');
+        const submitButton = document.getElementById('submitButton');
         zipForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            // ... (código del formulario de zip sin cambios)
+            const formData = new FormData(zipForm);
+            if (!formData.get('destinationNumber') || !formData.get('zipFile').name) {
+                return addLog({ text: '❌ Error: Completa todos los campos para el envío masivo.', type: 'log-error' });
+            }
+            submitButton.disabled = true;
+            submitButton.textContent = 'Subiendo...';
+            addLog({ text: 'Subiendo y procesando archivo ZIP...', type: 'log-info' });
+            try {
+                const response = await fetch('/subir-zip', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message);
+                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
+                zipForm.reset();
+            } catch (error) {
+                addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' });
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Subir y Despachar Tareas';
+            }
         });
 
         const checkStatusForm = document.getElementById('check-status-form');
-        checkStatusForm.addEventListener('submit', async (e) => {
+        checkStatusForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const number = document.getElementById('checkNumber').value.trim();
             if (!number) return addLog({ text: '❌ Ingresa un número para consultar.', type: 'log-error' });
@@ -169,6 +194,7 @@
         });
 
         const debugForm = document.getElementById('debug-form');
+        const debugButton = debugForm.querySelector('button');
         debugForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(debugForm);
@@ -176,6 +202,7 @@
             if (!data.recipientNumber || !data.newTimestamp) {
                 return addLog({ text: '❌ Completa ambos campos para forzar la actualización.', type: 'log-error' });
             }
+            debugButton.disabled = true;
             addLog({ text: `Forzando nueva fecha para ${data.recipientNumber}...`, type: 'log-warn' });
             try {
                 const response = await fetch('/debug-update-window', {
@@ -188,11 +215,27 @@
                 addLog({ text: `✅ ${result.message}`, type: 'log-success' });
             } catch (error) {
                 addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' });
+            } finally {
+                debugButton.disabled = false;
             }
         });
 
-        // --- Escuchas de Socket.IO ---
-        socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); });
+        // --- Lógica de Botones de la Tabla ---
+        viewConfirmedButton.addEventListener('click', () => {
+            socket.emit('ver-confirmados');
+            addLog({ text: 'Solicitando lista actualizada de confirmados...', type: 'log-info' });
+        });
+        clearDbButton.addEventListener('click', () => {
+            if (confirm("¿Estás seguro de que quieres borrar TODA la lista de confirmaciones? Esta acción no se puede deshacer.")) {
+                socket.emit('limpiar-confirmados');
+            }
+        });
+
+        // --- Escuchas de Eventos de Socket.IO ---
+        socket.on('connect', () => {
+            addLog({ text: 'Conectado al servidor.', type: 'log-success' });
+            socket.emit('ver-confirmados');
+        });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
         socket.on('workers-status-update', (data) => {
             availableWorkersCount.textContent = data.available;
@@ -213,8 +256,6 @@
                 confirmedTableBody.appendChild(tr);
             });
         });
-        document.getElementById('viewConfirmedButton').addEventListener('click', () => socket.emit('ver-confirmados'));
-        document.getElementById('clearDbButton').addEventListener('click', () => { if (confirm("¿Seguro?")) socket.emit('limpiar-confirmados'); });
     </script>
 </body>
 </html>
