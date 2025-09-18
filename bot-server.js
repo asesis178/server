@@ -95,6 +95,7 @@ async function initializeDatabase() {
 
 // --- LÓGICA DE SOCKET.IO ---
 io.on('connection', (socket) => {
+    console.log(`[Socket.IO] Usuario conectado: ${socket.id}`);
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
@@ -103,8 +104,27 @@ io.on('connection', (socket) => {
         const state = await getConversationWindowState(number);
         socket.emit('window-status-update', state);
     });
-    socket.on('ver-confirmados', async () => { /* ... */ });
-    socket.on('limpiar-confirmados', async () => { /* ... */ });
+
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            socket.emit('datos-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener confirmados:", dbError);
+        }
+    });
+
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('DELETE FROM confirmados');
+            console.log("[DB] Tabla 'confirmados' limpiada.");
+            io.emit('datos-confirmados', []);
+            socket.emit('status-update', { text: "✅ DB de confirmados limpiada.", isError: false, isComplete: true });
+        } catch (dbError) {
+            console.error("Error al limpiar confirmados:", dbError);
+            socket.emit('status-update', { text: "❌ Error al limpiar la DB.", isError: true, isComplete: true });
+        }
+    });
 });
 
 // --- ENDPOINTS ---
@@ -114,9 +134,25 @@ app.use('/assets', express.static(ASSETS_DIR));
 app.get('/', (req, res) => res.send('Servidor activo. Visita /panel para usar el control.'));
 
 // WEBHOOK PASIVO
-app.post('/webhook', async (req, res) => { /* ... */ });
+app.post('/webhook', async (req, res) => {
+    res.sendStatus(200);
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!message || message.type !== 'text') return;
+    const from = message.from;
+    const textBody = message.text.body.trim();
+    if (/^confirmado\s+\d{8}$/i.test(textBody)) {
+        const cedula = textBody.split(/\s+/)[1];
+        logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
+        try {
+            await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
+            io.emit('ver-confirmados');
+        } catch (dbError) {
+            logAndEmit(`[Confirmación Pasiva] ❌ Error al guardar en DB.`, 'log-error');
+        }
+    }
+});
 
-// NUEVO ENDPOINT DE DEPURACIÓN
+// ENDPOINT DE DEPURACIÓN
 app.post('/debug-update-window', upload.none(), async (req, res) => {
     const { recipientNumber, newTimestamp } = req.body;
     if (!recipientNumber || !newTimestamp) return res.status(400).json({ message: "Faltan datos." });
@@ -127,7 +163,7 @@ app.post('/debug-update-window', upload.none(), async (req, res) => {
             [recipientNumber, newTimestamp]
         );
         const state = await getConversationWindowState(recipientNumber);
-        io.emit('window-status-update', state); // Notificar a todos los paneles
+        io.emit('window-status-update', state);
         res.json({ message: `Fecha de activación forzada para ${recipientNumber}.` });
     } catch (error) {
         res.status(500).json({ message: "Error al actualizar la fecha." });
@@ -135,10 +171,51 @@ app.post('/debug-update-window', upload.none(), async (req, res) => {
 });
 
 // ENDPOINT DE ACTIVACIÓN MANUAL
-app.post('/manual-activate', upload.none(), async (req, res) => { /* ... */ });
+app.post('/manual-activate', upload.none(), async (req, res) => {
+    const { destinationNumber } = req.body;
+    if (!destinationNumber) return res.status(400).json({ message: "Falta el número de destino." });
+    if (availableWorkers.size === 0) return res.status(503).json({ message: "Todos los trabajadores están ocupados." });
+    const workerIndex = availableWorkers.values().next().value;
+    availableWorkers.delete(workerIndex);
+    io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
+    logAndEmit(`▶️ [Worker ${workerIndex}] iniciando activación MANUAL para ${destinationNumber}.`, 'log-info');
+    executeActivationSequence(destinationNumber, workerIndex);
+    res.status(202).json({ message: "Secuencia de activación manual iniciada." });
+});
 
 // ENDPOINT PARA SUBIR EL ZIP
-app.post('/subir-zip', upload.single('zipFile'), async (req, res) => { /* ... */ });
+app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
+    const { destinationNumber } = req.body;
+    const zipFile = req.file;
+    if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
+    const zipFilePath = zipFile.path;
+    try {
+        const zip = new AdmZip(zipFilePath);
+        const imageEntries = zip.getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName));
+        if (imageEntries.length === 0) return res.status(400).json({ message: "El ZIP no contiene imágenes válidas." });
+        logAndEmit(`📦 ZIP recibido. Optimizando ${imageEntries.length} imágenes...`, 'log-info');
+        const optimizationPromises = imageEntries.map(async (entry) => {
+            const originalFileName = path.basename(entry.entryName);
+            const optimizedFileName = `opt-${Date.now()}-${originalFileName.replace(/\s/g, '_')}`;
+            const targetPath = path.join(UPLOADS_DIR, optimizedFileName);
+            const imageBuffer = entry.getData();
+            await sharp(imageBuffer).resize({ width: 1920, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(targetPath);
+            return optimizedFileName;
+        });
+        const optimizedImageNames = await Promise.all(optimizationPromises);
+        const newTasks = optimizedImageNames.map(imageName => ({ recipientNumber: destinationNumber, imageName }));
+        taskQueue.push(...newTasks);
+        logAndEmit(`✅ Optimización completa. Se agregaron ${newTasks.length} tareas a la cola.`, 'log-success');
+        io.emit('queue-update', taskQueue.length);
+        processQueue();
+        res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos optimizados.` });
+    } catch (error) {
+        logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
+        res.status(500).json({ message: "Error interno al procesar el ZIP." });
+    } finally {
+        fs.unlink(zipFilePath, () => {});
+    }
+});
 
 // --- LÓGICA DE PROCESAMIENTO ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -165,8 +242,7 @@ async function processQueue() {
             logAndEmit(`⏸️ Cola pausada. Razón: ${windowState.details}`, 'log-warn');
             isQueuePaused = true;
         }
-        // Reintentar la verificación en 1 minuto
-        setTimeout(processQueue, 60000);
+        setTimeout(processQueue, 60000); // Reintentar la verificación en 1 minuto
         return;
     }
     isQueuePaused = false;
@@ -246,8 +322,6 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
         releaseWorkerAndContinue(workerIndex);
     }
 }
-
-// ... (El resto del código, como cleanupOldFiles, startServer, etc., ya lo tienes completo y no necesita cambios)
 
 function cleanupOldFiles() {
     const maxAge = 3600 * 1000;
