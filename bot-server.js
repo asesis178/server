@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
 if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) {
-    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida. Asegúrate de que PHONE_NUMBER_ID y WHATSAPP_TOKEN estén definidos.");
+    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida.");
     process.exit(1);
 }
 
@@ -104,11 +104,10 @@ app.post('/webhook', async (req, res) => {
     const from = message.from;
     const textBody = message.text.body.trim();
 
-    // --- CAMBIO 1: Lógica de confirmación más flexible ---
     const match = textBody.match(/confirmado\s+(\d{8})/i);
 
     if (match) {
-        const cedula = match[1]; // Captura solo los 8 dígitos
+        const cedula = match[1];
         logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
         try {
             await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
@@ -147,15 +146,16 @@ app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
 
         const optimizedImageNames = await Promise.all(optimizationPromises);
 
-        // --- CAMBIO 2: Duplicar cada tarea ---
-        const newTasks = optimizedImageNames.flatMap(imageName => ([
-            { recipientNumber: destinationNumber, imageName },
-            { recipientNumber: destinationNumber, imageName }
-        ]));
+        // --- CORRECCIÓN: Se elimina la duplicación de tareas ---
+        // Ahora usamos .map para crear una sola tarea por imagen.
+        const newTasks = optimizedImageNames.map(imageName => ({
+            recipientNumber: destinationNumber,
+            imageName
+        }));
         
         taskQueue.push(...newTasks);
 
-        logAndEmit(`✅ Optimización completa. Se agregaron ${newTasks.length} tareas (x2 por imagen) a la cola.`, 'log-success');
+        logAndEmit(`✅ Optimización completa. Se agregaron ${newTasks.length} tareas a la cola.`, 'log-success');
         io.emit('queue-update', taskQueue.length);
         processQueue();
         res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos optimizados.` });
