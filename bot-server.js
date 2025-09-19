@@ -9,6 +9,7 @@ const fs = require('fs');
 const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 const sharp = require('sharp');
+const basicAuth = require('express-basic-auth');
 
 // --- CONFIGURACIÓN ---
 const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_ID ? process.env.PHONE_NUMBER_ID.split(',') : [];
@@ -17,6 +18,17 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
+
+
+if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) {
+    console.error("❌ Error Crítico: Faltan las credenciales ADMIN_USER o ADMIN_PASSWORD en el archivo .env.");
+    process.exit(1);
+}
+const requireAuth = basicAuth({
+    users: { [process.env.ADMIN_USER]: process.env.ADMIN_PASSWORD },
+    challenge: true, // Esto hace que el navegador muestre el pop-up de login
+    unauthorizedResponse: 'Acceso no autorizado. Se requieren credenciales válidas.'
+});
 
 if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) {
     console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida.");
@@ -55,7 +67,7 @@ function logAndEmit(text, type = 'log-info') {
     io.emit('status-update', { text, type });
 }
 
-// --- LÓGICA DE GESTIÓN DE VENTANA ---
+// --- LÓGICA DE GESTIÓN DE VENTANA (CORREGIDA) ---
 async function getConversationWindowState(recipientNumber) {
     const windowResult = await pool.query('SELECT last_activation_time FROM conversation_windows WHERE recipient_number = $1', [recipientNumber]);
     if (windowResult.rowCount === 0) {
@@ -65,15 +77,24 @@ async function getConversationWindowState(recipientNumber) {
     const minutesSinceActivation = (Date.now() - lastActivation) / (1000 * 60);
     const minutesLeft = 24 * 60 - minutesSinceActivation;
 
+    // 1. Comprobar si está en período de enfriamiento (primeros 10 minutos).
     if (minutesSinceActivation < 10) {
         return { status: 'COOL_DOWN', details: `Enfriamiento por ${Math.round(10 - minutesSinceActivation)} min más` };
     }
-    if (minutesLeft < 20) {
-        return { status: 'EXPIRING_SOON', details: `Expira en ${Math.round(minutesLeft)} min` };
-    }
+
+    // 2. <<< CORRECCIÓN: Comprobar si está expirada PRIMERO.
+    // Esta es la condición más importante después del cooldown.
     if (minutesLeft <= 0) {
         return { status: 'INACTIVE', details: 'Expirada' };
     }
+
+    // 3. <<< CORRECCIÓN: Ahora comprobar si expira pronto.
+    // Este bloque solo se ejecutará si minutesLeft está entre 0 y 20 (ej: 15).
+    if (minutesLeft < 20) {
+        return { status: 'EXPIRING_SOON', details: `Expira en ${Math.round(minutesLeft)} min` };
+    }
+
+    // 4. Si ninguna de las condiciones anteriores se cumple, está activa.
     return { status: 'ACTIVE', details: `Activa por ${Math.floor(minutesLeft / 60)}h ${Math.round(minutesLeft % 60)}m más` };
 }
 
@@ -98,12 +119,26 @@ io.on('connection', (socket) => {
     const activeWorkersCount = senderPool.length - availableWorkers.size;
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
-
     socket.on('request-window-status', async ({ number }) => {
         try {
             const state = await getConversationWindowState(number);
-            socket.emit('window-status-update', state);
+
+            // <<<--- INICIO DE LA CORRECCIÓN
+            // En lugar de actualizar la UI principal, enviamos el resultado como un log
+            // personalizado solo al usuario que lo solicitó.
+            // El evento 'status-update' ya es manejado por el frontend para añadir logs.
+            let logType = 'log-info';
+            if (state.status === 'ACTIVE' || state.status === 'COOL_DOWN') logType = 'log-success';
+            if (state.status === 'INACTIVE' || state.status === 'EXPIRING_SOON') logType = 'log-warn';
+
+            socket.emit('status-update', {
+                text: `[Consulta] Estado para ${number}: <strong>${state.status}</strong> (${state.details})`,
+                type: logType
+            });
+            // <<<--- FIN DE LA CORRECCIÓN
+
         } catch (error) {
+            // El manejo de errores ya era correcto. Se envía a los logs globales.
             logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error');
         }
     });
@@ -127,7 +162,7 @@ io.on('connection', (socket) => {
 });
 
 // --- ENDPOINTS ---
-app.get('/panel', (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
+app.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/assets', express.static(ASSETS_DIR));
 app.get('/', (req, res) => res.send('Servidor activo. Visita /panel para usar el control.'));
@@ -152,7 +187,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ENDPOINT DE DEPURACIÓN (CORREGIDO)
-app.post('/debug-update-window', async (req, res) => { // <-- Se eliminó upload.none()
+app.post('/debug-update-window', requireAuth, async (req, res) => { // <-- Se eliminó upload.none()
     const { recipientNumber, newTimestamp } = req.body;
     if (!recipientNumber || !newTimestamp) return res.status(400).json({ message: "Faltan datos." });
     try {
@@ -171,7 +206,7 @@ app.post('/debug-update-window', async (req, res) => { // <-- Se eliminó upload
 });
 
 // ENDPOINT DE ACTIVACIÓN MANUAL
-app.post('/manual-activate', upload.none(), async (req, res) => {
+app.post('/manual-activate', requireAuth, upload.none(), async (req, res) => {
     const { destinationNumber } = req.body;
     if (!destinationNumber) return res.status(400).json({ message: "Falta el número de destino." });
     if (availableWorkers.size === 0) return res.status(503).json({ message: "Todos los trabajadores están ocupados." });
@@ -184,7 +219,7 @@ app.post('/manual-activate', upload.none(), async (req, res) => {
 });
 
 // ENDPOINT PARA SUBIR EL ZIP
-app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
+app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) => {
     const { destinationNumber } = req.body;
     const zipFile = req.file;
     if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
@@ -213,7 +248,7 @@ app.post('/subir-zip', upload.single('zipFile'), async (req, res) => {
         logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
         res.status(500).json({ message: "Error interno al procesar el ZIP." });
     } finally {
-        fs.unlink(zipFilePath, () => {});
+        fs.unlink(zipFilePath, () => { });
     }
 });
 
@@ -326,7 +361,7 @@ function cleanupOldFiles() {
             fs.stat(filePath, (err, stats) => {
                 if (err) return;
                 if (Date.now() - stats.mtime.getTime() > maxAge) {
-                    fs.unlink(filePath, () => {});
+                    fs.unlink(filePath, () => { });
                 }
             });
         });
