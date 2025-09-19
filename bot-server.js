@@ -223,39 +223,67 @@ app.post('/manual-activate', requireAuth, upload.none(), async (req, res) => {
 });
 
 // ENDPOINT PARA SUBIR EL ZIP
+// ENDPOINT PARA SUBIR EL ZIP (MODIFICADO PARA SER MÁS ESTABLE)
 app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) => {
     const { destinationNumber } = req.body;
     const zipFile = req.file;
     if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
+
     const zipFilePath = zipFile.path;
     try {
         const zip = new AdmZip(zipFilePath);
         const imageEntries = zip.getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName));
         if (imageEntries.length === 0) return res.status(400).json({ message: "El ZIP no contiene imágenes válidas." });
-        logAndEmit(`📦 ZIP recibido. Optimizando ${imageEntries.length} imágenes...`, 'log-info');
-        const optimizationPromises = imageEntries.map(async (entry) => {
+        
+        // <<< CAMBIO 1: Eliminamos el ZIP temporal inmediatamente después de abrirlo en memoria.
+        // Ya tenemos las entradas del ZIP en la variable `imageEntries`, no necesitamos más el archivo físico.
+        fs.unlinkSync(zipFilePath); 
+        logAndEmit(`📦 ZIP recibido y borrado. Optimizando ${imageEntries.length} imágenes una por una...`, 'log-info');
+
+        // <<< CAMBIO 2: Procesamiento en serie para evitar picos de CPU y RAM.
+        // Reemplazamos Promise.all por un bucle `for...of`.
+        const optimizedImageNames = [];
+        for (const entry of imageEntries) {
             const originalFileName = path.basename(entry.entryName);
             const optimizedFileName = `opt-${Date.now()}-${originalFileName.replace(/\s/g, '_')}`;
             const targetPath = path.join(UPLOADS_DIR, optimizedFileName);
             const imageBuffer = entry.getData();
-            await sharp(imageBuffer).resize({ width: 1920, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(targetPath);
-            return optimizedFileName;
-        });
-        const optimizedImageNames = await Promise.all(optimizationPromises);
+
+            try {
+                // `await` dentro del bucle asegura que procesamos una imagen a la vez.
+                await sharp(imageBuffer)
+                    .resize({ width: 1920, withoutEnlargement: true })
+                    .jpeg({ quality: 80 })
+                    .toFile(targetPath);
+                
+                optimizedImageNames.push(optimizedFileName);
+                // Opcional: emitir un log por cada imagen optimizada para dar feedback en ZIPs grandes.
+                // logAndEmit(`  - Optimizada: ${originalFileName}`, 'log-info');
+
+            } catch (sharpError) {
+                logAndEmit(`⚠️ No se pudo optimizar la imagen ${originalFileName}. Saltando... Error: ${sharpError.message}`, 'log-warn');
+            }
+        }
+
+        if (optimizedImageNames.length === 0) {
+            logAndEmit(`❌ No se pudo optimizar ninguna imagen del ZIP.`, 'log-error');
+            return res.status(400).json({ message: "Ninguna imagen en el ZIP pudo ser procesada." });
+        }
+
         const newTasks = optimizedImageNames.map(imageName => ({ recipientNumber: destinationNumber, imageName }));
         taskQueue.push(...newTasks);
+
         logAndEmit(`✅ Optimización completa. Se agregaron ${newTasks.length} tareas a la cola.`, 'log-success');
         io.emit('queue-update', taskQueue.length);
         processQueue();
         res.status(200).json({ message: `Se han encolado ${newTasks.length} envíos optimizados.` });
+
     } catch (error) {
         logAndEmit(`❌ Error fatal al procesar el ZIP: ${error.message}`, 'log-error');
         res.status(500).json({ message: "Error interno al procesar el ZIP." });
-    } finally {
-        fs.unlink(zipFilePath, () => { });
-    }
+    } 
+    // <<< CAMBIO 3: Ya no necesitamos el `finally` para borrar el ZIP porque lo hacemos antes.
 });
-
 // --- LÓGICA DE PROCESAMIENTO ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -356,16 +384,29 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
     }
 }
 
-function cleanupOldFiles() {
-    const maxAge = 3600 * 1000;
-    fs.readdir(UPLOADS_DIR, (err, files) => {
-        if (err) return;
+function cleanupOldFiles(directory, maxAge) {
+    fs.readdir(directory, (err, files) => {
+        if (err) {
+            console.error(`Error al leer el directorio ${directory}:`, err);
+            return;
+        }
+
         files.forEach(file => {
-            const filePath = path.join(UPLOADS_DIR, file);
+            const filePath = path.join(directory, file);
             fs.stat(filePath, (err, stats) => {
-                if (err) return;
+                if (err) {
+                    console.error(`Error al obtener stats de ${file}:`, err);
+                    return;
+                }
+                
                 if (Date.now() - stats.mtime.getTime() > maxAge) {
-                    fs.unlink(filePath, () => { });
+                    fs.unlink(filePath, (unlinkErr) => {
+                        if (unlinkErr) {
+                            console.error(`Error al borrar archivo antiguo ${file}:`, unlinkErr);
+                        } else {
+                            console.log(`🧹 Archivo antiguo borrado: ${file}`);
+                        }
+                    });
                 }
             });
         });
@@ -378,7 +419,20 @@ async function startServer() {
         await initializeDatabase();
         server.listen(PORT, () => {
             console.log(`🚀 Servidor iniciado. Pool de ${senderPool.length} remitente(s) listo.`);
-            cleanupOldFiles();
+            
+            // <<< CAMBIO 5: Configuración de la limpieza periódica.
+            const unaSemanaEnMs = 7 * 24 * 60 * 60 * 1000;
+            
+            // Ejecutamos la limpieza una vez al iniciar...
+            console.log('🧹 Realizando limpieza inicial de archivos antiguos...');
+            cleanupOldFiles(UPLOADS_DIR, unaSemanaEnMs);
+
+            // ...y luego la programamos para que se ejecute cada 24 horas.
+            setInterval(() => {
+                console.log('🧹 Ejecutando limpieza periódica programada de archivos antiguos...');
+                cleanupOldFiles(UPLOADS_DIR, unaSemanaEnMs);
+            }, 24 * 60 * 60 * 1000); // Cada 24 horas
+
         });
     } catch (error) {
         console.error("🔥🔥🔥 FALLO CRÍTICO AL INICIAR EL SERVIDOR 🔥🔥🔥");

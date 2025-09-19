@@ -439,7 +439,7 @@
         });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
         socket.on('nueva-confirmacion-recibida', () => {
-        addLog({ text: '🔔 Nueva confirmación recibida, actualizando tabla...', type: 'log-info' });
+        addLog({ text: '🔔 Nueva confirmación recibida, tabla actualizada', type: 'log-info' });
         // Ahora sí, le pedimos al servidor la nueva lista
         socket.emit('ver-confirmados'); 
     });
