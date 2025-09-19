@@ -174,12 +174,16 @@ app.post('/webhook', async (req, res) => {
     if (!message || message.type !== 'text') return;
     const from = message.from;
     const textBody = message.text.body.trim();
-    if (/^confirmado\s+\d{8}$/i.test(textBody)) {
-        const cedula = textBody.split(/\s+/)[1];
+ const match = textBody.match(/confirmado\s+(\d{8})/i);
+
+    // `match` será `null` si no se encuentra el patrón.
+    // Si se encuentra, será un array, y el número de 8 dígitos estará en `match[1]`.
+    if (match) {
+        const cedula = match[1]; 
         logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
         try {
             await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
-            io.emit('ver-confirmados');
+           io.emit('nueva-confirmacion-recibida');
         } catch (dbError) {
             logAndEmit(`[Confirmación Pasiva] ❌ Error al guardar en DB.`, 'log-error');
         }

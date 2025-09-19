@@ -438,6 +438,11 @@
             socket.emit('ver-confirmados');
         });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
+        socket.on('nueva-confirmacion-recibida', () => {
+        addLog({ text: '🔔 Nueva confirmación recibida, actualizando tabla...', type: 'log-info' });
+        // Ahora sí, le pedimos al servidor la nueva lista
+        socket.emit('ver-confirmados'); 
+    });
         socket.on('workers-status-update', (data) => {
             availableWorkersCount.textContent = data.available;
             activeWorkersCount.textContent = data.active;
