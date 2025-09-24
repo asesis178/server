@@ -7,228 +7,43 @@
     <title>Panel de Control - Bot vFinal</title>
     <style>
         :root {
-            --color-bg: #f0f2f5;
-            --color-surface: #ffffff;
-            --color-primary: #1877f2;
-            --color-primary-hover: #166fe5;
-            --color-danger: #fa383e;
-            --color-danger-hover: #e0282e;
-            --color-text: #1c1e21;
-            --color-text-secondary: #65676b;
-            --color-border: #dddfe2;
-            --color-success: #42b72a;
-            --color-warn: #f5a623;
-            --color-info: #50b1f5;
-            --color-inactive: #8a929b;
+            --color-bg: #f0f2f5; --color-surface: #ffffff; --color-primary: #1877f2;
+            --color-primary-hover: #166fe5; --color-danger: #fa383e; --color-danger-hover: #e0282e;
+            --color-text: #1c1e21; --color-text-secondary: #65676b; --color-border: #dddfe2;
+            --color-success: #42b72a; --color-warn: #f5a623; --color-info: #50b1f5; --color-inactive: #8a929b;
         }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: var(--color-bg);
-            margin: 0;
-            padding: 20px;
-            color: var(--color-text);
-        }
-
-        .card {
-            background-color: var(--color-surface);
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 800px;
-            margin-bottom: 25px;
-            padding: 25px;
-            box-sizing: border-box;
-        }
-
-        h1,
-        h2 {
-            margin-top: 0;
-            border-bottom: 1px solid var(--color-border);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-
-        h1 {
-            font-size: 24px;
-        }
-
-        h2 {
-            font-size: 20px;
-        }
-
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .status-box {
-            background-color: var(--color-bg);
-            padding: 15px;
-            border-radius: 8px;
-        }
-
-        .status-box .label {
-            font-size: 14px;
-            color: var(--color-text-secondary);
-            margin-bottom: 5px;
-        }
-
-        .status-box .value {
-            font-size: 24px;
-            font-weight: bold;
-        }
-
-        .status-box .details {
-            font-size: 12px;
-            color: var(--color-text-secondary);
-            margin-top: 5px;
-            height: 1.2em;
-        }
-
-        .status-indicator {
-            padding: 5px 12px;
-            border-radius: 15px;
-            color: white;
-            font-size: 14px;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-
-        .status-indicator.active {
-            background-color: var(--color-success);
-        }
-
-        .status-indicator.cool_down {
-            background-color: var(--color-info);
-        }
-
-        .status-indicator.expiring_soon {
-            background-color: var(--color-warn);
-        }
-
-        .status-indicator.inactive {
-            background-color: var(--color-inactive);
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: var(--color-text-secondary);
-        }
-
-        input[type="text"],
-        input[type="file"],
-        input[type="datetime-local"] {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 15px;
-            border: 1px solid var(--color-border);
-            border-radius: 6px;
-            font-size: 16px;
-            box-sizing: border-box;
-        }
-
-        button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button:disabled {
-            background-color: #ccd0d5;
-            cursor: not-allowed;
-        }
-
-        .primary-btn {
-            background-color: var(--color-primary);
-            color: white;
-            margin-bottom: 15px;
-        }
-
-        .primary-btn:hover:not(:disabled) {
-            background-color: var(--color-primary-hover);
-        }
-
-        .danger-btn {
-            background-color: var(--color-danger);
-            color: white;
-        }
-
-        .danger-btn:hover:not(:disabled) {
-            background-color: var(--color-danger-hover);
-        }
-
-        .secondary-btn {
-            background-color: #e4e6eb;
-            color: var(--color-text);
-        }
-
-        .secondary-btn:hover:not(:disabled) {
-            background-color: #dadde1;
-        }
-
-        #log-container {
-            background-color: #1c1e21;
-            color: #e4e6eb;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-            font-size: 14px;
-            height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-
-        .log-entry {
-            margin-bottom: 5px;
-            word-break: break-all;
-        }
-
-        .log-success {
-            color: #33ff33;
-        }
-
-        .log-error {
-            color: #ff4d4d;
-        }
-
-        .log-warn {
-            color: #f5a623;
-        }
-
-        .log-info {
-            color: #50b1f5;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-
-        th,
-        td {
-            padding: 12px;
-            border: 1px solid var(--color-border);
-            text-align: left;
-        }
-
-        th {
-            background-color: var(--color-bg);
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background-color: var(--color-bg); margin: 0; padding: 20px; color: var(--color-text); }
+        .card { background-color: var(--color-surface); border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 800px; margin-bottom: 25px; padding: 25px; box-sizing: border-box; }
+        h1, h2 { margin-top: 0; border-bottom: 1px solid var(--color-border); padding-bottom: 10px; margin-bottom: 20px; }
+        h1 { font-size: 24px; } h2 { font-size: 20px; }
+        .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 20px; text-align: center; }
+        .status-box { background-color: var(--color-bg); padding: 15px; border-radius: 8px; }
+        .status-box .label { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 5px; }
+        .status-box .value { font-size: 24px; font-weight: bold; }
+        .status-box .details { font-size: 12px; color: var(--color-text-secondary); margin-top: 5px; height: 1.2em; }
+        .status-indicator { padding: 5px 12px; border-radius: 15px; color: white; font-size: 14px; font-weight: 500; text-transform: uppercase; }
+        .status-indicator.active { background-color: var(--color-success); }
+        .status-indicator.cool_down { background-color: var(--color-info); }
+        .status-indicator.expiring_soon { background-color: var(--color-warn); }
+        .status-indicator.inactive { background-color: var(--color-inactive); }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--color-text-secondary); }
+        input[type="text"], input[type="file"], input[type="datetime-local"], input[type="number"] { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
+        button:disabled { background-color: #ccd0d5; cursor: not-allowed; }
+        .primary-btn { background-color: var(--color-primary); color: white; margin-bottom: 15px; }
+        .primary-btn:hover:not(:disabled) { background-color: var(--color-primary-hover); }
+        .danger-btn { background-color: var(--color-danger); color: white; }
+        .danger-btn:hover:not(:disabled) { background-color: var(--color-danger-hover); }
+        .secondary-btn { background-color: #e4e6eb; color: var(--color-text); }
+        .secondary-btn:hover:not(:disabled) { background-color: #dadde1; }
+        #log-container { background-color: #1c1e21; color: #e4e6eb; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 14px; height: 300px; overflow-y: auto; padding: 15px; border-radius: 8px; margin-top: 20px; }
+        .log-entry { margin-bottom: 5px; word-break: break-all; }
+        .log-success { color: #33ff33; } .log-error { color: #ff4d4d; }
+        .log-warn { color: #f5a623; } .log-info { color: #50b1f5; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; border: 1px solid var(--color-border); text-align: left; }
+        th { background-color: var(--color-bg); }
+        hr { border: 0; height: 1px; background: var(--color-border); margin: 25px 0; }
     </style>
 </head>
 
@@ -236,26 +51,11 @@
     <div class="card">
         <h1>Panel de Control del Bot Autónomo</h1>
         <div class="status-grid">
-            <div class="status-box">
-                <div class="label">Tareas en Cola</div>
-                <div class="value" id="queue-count">0</div>
-            </div>
-            <div class="status-box">
-                <div class="label">Trabajadores Libres</div>
-                <div class="value" id="available-workers-count" style="color: var(--color-success);">0</div>
-            </div>
-            <div class="status-box">
-                <div class="label">Trabajadores Ocupados</div>
-                <div class="value" id="active-workers-count" style="color: var(--color-warn);">0</div>
-            </div>
-            <div class="status-box">
-                <div class="label">Estado de Ventana</div>
-                <div class="value"><span id="window-status-indicator" class="status-indicator inactive">Inactiva</span>
-                </div>
-                <div class="details" id="window-status-details">&nbsp;</div>
-            </div>
+            <div class="status-box"> <div class="label">Tareas en Cola</div> <div class="value" id="queue-count">0</div> </div>
+            <div class="status-box"> <div class="label">Workers Libres</div> <div class="value" id="available-workers-count" style="color: var(--color-success);">0</div> </div>
+            <div class="status-box"> <div class="label">Workers Ocupados</div> <div class="value" id="active-workers-count" style="color: var(--color-warn);">0</div> </div>
+            <div class="status-box"> <div class="label">Estado de Ventana</div> <div class="value"><span id="window-status-indicator" class="status-indicator inactive">Inactiva</span></div> <div class="details" id="window-status-details">&nbsp;</div> </div>
         </div>
-
         <h2>Envío Masivo de Imágenes</h2>
         <form id="zip-form">
             <label for="destinationNumber">Número de Destino</label>
@@ -264,17 +64,32 @@
             <input type="file" id="zipFile" name="zipFile" accept=".zip" required>
             <button type="submit" id="submitButton" class="primary-btn">Subir y Despachar Tareas</button>
         </form>
-
         <h2>Log de Actividad en Tiempo Real</h2>
         <div id="log-container"></div>
     </div>
 
     <div class="card">
-        <h2>Herramientas de Depuración</h2>
+        <h2>Herramientas de Depuración y Configuración</h2>
         <form id="check-status-form">
             <label for="checkNumber">Consultar Estado de Ventana para un Número</label>
             <input type="text" id="checkNumber" name="checkNumber" placeholder="Ej: 5491122334455" required>
             <button type="submit" class="secondary-btn">Consultar Estado</button>
+        </form>
+        <hr>
+        <form id="manual-activate-form">
+            <label for="activateNumber">Activar Ventana Manualmente para un Número</label>
+            <input type="text" id="activateNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
+            <button type="submit" class="secondary-btn">Iniciar Activación</button>
+        </form>
+        <hr>
+        <form id="delay-settings-form">
+            <label for="delay1">Delay 1 (tras 1er mensaje, ms)</label>
+            <input type="number" id="delay1" name="delay1" min="0" required>
+            <label for="delay2">Delay 2 (tras 2do mensaje, ms)</label>
+            <input type="number" id="delay2" name="delay2" min="0" required>
+            <label for="taskSeparation">Separación entre Tareas (ms)</label>
+            <input type="number" id="taskSeparation" name="taskSeparation" min="0" required>
+            <button type="submit" class="secondary-btn">Actualizar Tiempos</button>
         </form>
         <hr>
         <form id="debug-form">
@@ -284,12 +99,6 @@
             <input type="datetime-local" id="newTimestamp" name="newTimestamp" required>
             <button type="submit" class="danger-btn">Forzar Actualización</button>
         </form>
-        <hr>
-        <form id="manual-activate-form">
-            <label for="activateNumber">Activar Ventana Manualmente para un Número</label>
-            <input type="text" id="activateNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
-            <button type="submit" class="secondary-btn">Iniciar Activación</button>
-        </form>
     </div>
 
     <div class="card">
@@ -297,13 +106,7 @@
         <button id="viewConfirmedButton" class="primary-btn">Actualizar Lista</button>
         <button id="clearDbButton" class="danger-btn">Limpiar Lista de Confirmaciones</button>
         <table>
-            <thead>
-                <tr>
-                    <th>Número</th>
-                    <th>Cédula</th>
-                    <th>Fecha de Confirmación</th>
-                </tr>
-            </thead>
+            <thead> <tr> <th>Número</th> <th>Cédula</th> <th>Fecha de Confirmación</th> </tr> </thead>
             <tbody id="confirmedTableBody"></tbody>
         </table>
     </div>
@@ -319,8 +122,10 @@
         const confirmedTableBody = document.getElementById('confirmedTableBody');
         const windowStatusIndicator = document.getElementById('window-status-indicator');
         const windowStatusDetails = document.getElementById('window-status-details');
-        const viewConfirmedButton = document.getElementById('viewConfirmedButton');
-        const clearDbButton = document.getElementById('clearDbButton');
+        const delayForm = document.getElementById('delay-settings-form');
+        const delay1Input = document.getElementById('delay1');
+        const delay2Input = document.getElementById('delay2');
+        const taskSeparationInput = document.getElementById('taskSeparation');
 
         function addLog(message) {
             const entry = document.createElement('div');
@@ -331,82 +136,54 @@
             logContainer.scrollTop = logContainer.scrollHeight;
         }
 
-        function updateWindowStatusUI(data) {
-            windowStatusIndicator.textContent = data.status.replace(/_/g, ' ');
-            windowStatusIndicator.className = `status-indicator ${data.status.toLowerCase()}`;
-            windowStatusDetails.textContent = data.details || '\xA0'; // \xA0 is a non-breaking space
-        }
-
         // --- Lógica de Formularios ---
-        // Añadir esto junto a la lógica de los otros formularios
-        const manualActivateForm = document.getElementById('manual-activate-form');
-        manualActivateForm.addEventListener('submit', async (e) => {
+        document.getElementById('zip-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const formData = new FormData(manualActivateForm);
-            const number = formData.get('destinationNumber');
-            if (!number) return;
-
-            addLog({ text: `Iniciando activación manual para ${number}...`, type: 'log-info' });
-            try {
-                const response = await fetch('/manual-activate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ destinationNumber: number })
-                });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message);
-                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-            } catch (error) {
-                addLog({ text: `❌ Error en activación manual: ${error.message}`, type: 'log-error' });
-            }
-        });
-        const zipForm = document.getElementById('zip-form');
-        const submitButton = document.getElementById('submitButton');
-        zipForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(zipForm);
-            if (!formData.get('destinationNumber') || !formData.get('zipFile').name) {
-                return addLog({ text: '❌ Error: Completa todos los campos para el envío masivo.', type: 'log-error' });
-            }
-            submitButton.disabled = true;
-            submitButton.textContent = 'Subiendo...';
-            addLog({ text: 'Subiendo y procesando archivo ZIP...', type: 'log-info' });
+            const form = e.target;
+            const button = form.querySelector('button');
+            const formData = new FormData(form);
+            if (!formData.get('destinationNumber') || !formData.get('zipFile').name) return addLog({ text: '❌ Completa todos los campos.', type: 'log-error' });
+            button.disabled = true; button.textContent = 'Subiendo...';
+            addLog({ text: 'Subiendo y procesando ZIP...', type: 'log-info' });
             try {
                 const response = await fetch('/subir-zip', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.message);
                 addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-                zipForm.reset();
-            } catch (error) {
-                addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' });
-            } finally {
-                submitButton.disabled = false;
-                submitButton.textContent = 'Subir y Despachar Tareas';
-            }
+                form.reset();
+            } catch (error) { addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' }); }
+            finally { button.disabled = false; button.textContent = 'Subir y Despachar Tareas'; }
         });
 
-        const checkStatusForm = document.getElementById('check-status-form');
-        checkStatusForm.addEventListener('submit', (e) => {
+        document.getElementById('check-status-form').addEventListener('submit', (e) => {
             e.preventDefault();
             const number = document.getElementById('checkNumber').value.trim();
-            if (!number) return addLog({ text: '❌ Ingresa un número para consultar.', type: 'log-error' });
-            addLog({ text: `Consultando estado para ${number}...`, type: 'log-info' });
-            socket.emit('request-window-status', { number });
+            if (number) socket.emit('request-window-status', { number });
         });
 
-        const debugForm = document.getElementById('debug-form');
-        const debugButton = debugForm.querySelector('button');
-        debugForm.addEventListener('submit', async (e) => {
+        document.getElementById('manual-activate-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const formData = new FormData(debugForm);
-            const data = Object.fromEntries(formData.entries());
-            if (!data.recipientNumber || !data.newTimestamp) {
-                return addLog({ text: '❌ Completa ambos campos para forzar la actualización.', type: 'log-error' });
-            }
-            debugButton.disabled = true;
-            addLog({ text: `Forzando nueva fecha para ${data.recipientNumber}...`, type: 'log-warn' });
+            const number = document.getElementById('activateNumber').value.trim();
+            if (!number) return;
             try {
-                const response = await fetch('/debug-update-window', {
+                const response = await fetch('/manual-activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ destinationNumber: number }) });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message);
+                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
+            } catch (error) { addLog({ text: `❌ Error en activación manual: ${error.message}`, type: 'log-error' }); }
+        });
+
+        delayForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const button = e.target.querySelector('button');
+            const data = {
+                delay1: delay1Input.value,
+                delay2: delay2Input.value,
+                taskSeparation: taskSeparationInput.value,
+            };
+            button.disabled = true;
+            try {
+                const response = await fetch('/update-delays', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -415,54 +192,56 @@
                 if (!response.ok) throw new Error(result.message);
                 addLog({ text: `✅ ${result.message}`, type: 'log-success' });
             } catch (error) {
-                addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' });
+                addLog({ text: `❌ Error al actualizar delays: ${error.message}`, type: 'log-error' });
             } finally {
-                debugButton.disabled = false;
+                button.disabled = false;
             }
         });
 
-        // --- Lógica de Botones de la Tabla ---
-        viewConfirmedButton.addEventListener('click', () => {
-            socket.emit('ver-confirmados');
-            addLog({ text: 'Solicitando lista actualizada de confirmados...', type: 'log-info' });
+        document.getElementById('debug-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target).entries());
+            if (!data.recipientNumber || !data.newTimestamp) return;
+            try {
+                const response = await fetch('/debug-update-window', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message);
+                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
+            } catch (error) { addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' }); }
         });
-        clearDbButton.addEventListener('click', () => {
-            if (confirm("¿Estás seguro de que quieres borrar TODA la lista de confirmaciones? Esta acción no se puede deshacer.")) {
-                socket.emit('limpiar-confirmados');
-            }
+
+        document.getElementById('viewConfirmedButton').addEventListener('click', () => socket.emit('ver-confirmados'));
+        document.getElementById('clearDbButton').addEventListener('click', () => {
+            if (confirm("¿Borrar TODAS las confirmaciones? Esta acción es irreversible.")) socket.emit('limpiar-confirmados');
         });
 
         // --- Escuchas de Eventos de Socket.IO ---
-        socket.on('connect', () => {
-            addLog({ text: 'Conectado al servidor.', type: 'log-success' });
-            socket.emit('ver-confirmados');
-        });
+        socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
-        socket.on('nueva-confirmacion-recibida', () => {
-        addLog({ text: '🔔 Nueva confirmación recibida, tabla actualizada', type: 'log-info' });
-        // Ahora sí, le pedimos al servidor la nueva lista
-        socket.emit('ver-confirmados'); 
-    });
-        socket.on('workers-status-update', (data) => {
-            availableWorkersCount.textContent = data.available;
-            activeWorkersCount.textContent = data.active;
-        });
-        socket.on('window-status-update', updateWindowStatusUI);
+        socket.on('nueva-confirmacion-recibida', () => { addLog({ text: '🔔 Nueva confirmación recibida, tabla actualizada', type: 'log-info' }); socket.emit('ver-confirmados'); });
+        socket.on('workers-status-update', (data) => { availableWorkersCount.textContent = data.available; activeWorkersCount.textContent = data.active; });
+        socket.on('window-status-update', (data) => { windowStatusIndicator.textContent = data.status.replace(/_/g, ' '); windowStatusIndicator.className = `status-indicator ${data.status.toLowerCase()}`; windowStatusDetails.textContent = data.details || '\xA0'; });
         socket.on('status-update', addLog);
         socket.on('datos-confirmados', (data) => {
             confirmedTableBody.innerHTML = '';
-            if (!data || data.length === 0) {
-                confirmedTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No hay confirmaciones.</td></tr>';
-                return;
-            }
+            if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No hay confirmaciones.</td></tr>'; return; }
             data.forEach(row => {
                 const tr = document.createElement('tr');
-                const formattedDate = new Date(row.confirmado_en).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'medium' });
-                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${formattedDate}</td>`;
+                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${new Date(row.confirmado_en).toLocaleString('es-ES')}</td>`;
                 confirmedTableBody.appendChild(tr);
             });
         });
+        socket.on('initial-delay-settings', (settings) => {
+            delay1Input.value = settings.delay1;
+            delay2Input.value = settings.delay2;
+            taskSeparationInput.value = settings.taskSeparation;
+        });
+        socket.on('delay-settings-updated', (settings) => {
+            delay1Input.value = settings.delay1;
+            delay2Input.value = settings.delay2;
+            taskSeparationInput.value = settings.taskSeparation;
+            addLog({ text: '🔧 La configuración de delays ha sido actualizada.', type: 'log-warn' });
+        });
     </script>
 </body>
-
 </html>
