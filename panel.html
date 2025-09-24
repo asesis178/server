@@ -99,7 +99,6 @@
             </div>
         </div>
         
-        <!-- <<< NUEVO CARD PARA CONTROL DE COLA >>> -->
         <div class="card" style="--card-index: 2;">
             <h2><i class="fa-solid fa-sliders" style="color: var(--color-text-secondary);"></i> Control de la Cola</h2>
             <div class="status-grid">
@@ -185,11 +184,37 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        document.getElementById('theme-switcher').addEventListener('click', () => {
+        // <<< INICIO DE LA LÓGICA DEL THEME SWITCHER MODIFICADA >>>
+        
+        // Función centralizada para establecer el tema
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme); // Guarda la preferencia en localStorage
+        }
+
+        const themeSwitcher = document.getElementById('theme-switcher');
+        themeSwitcher.addEventListener('click', () => {
             const currentTheme = document.documentElement.getAttribute('data-theme');
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', newTheme);
+            setTheme(newTheme);
         });
+
+        // Script de inicialización que se ejecuta al cargar la página
+        (() => {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            if (savedTheme) {
+                // Si hay un tema guardado, úsalo
+                setTheme(savedTheme);
+            } else if (prefersDark) {
+                // Si no hay nada guardado, pero el sistema prefiere oscuro, usa oscuro
+                setTheme('dark');
+            }
+            // Si no, se queda con 'light' que está por defecto en el HTML
+        })();
+        
+        // <<< FIN DE LA LÓGICA DEL THEME SWITCHER MODIFICADA >>>
         
         const socket = io();
         const logContainer = document.getElementById('log-container');
@@ -204,7 +229,6 @@
         const delay2Input = document.getElementById('delay2');
         const taskSeparationInput = document.getElementById('taskSeparation');
 
-        // <<< NUEVOS SELECTORES PARA CONTROL DE COLA >>>
         const queueStatusIndicator = document.getElementById('queue-status-indicator');
         const togglePauseButton = document.getElementById('toggle-pause-button');
         const clearQueueButton = document.getElementById('clear-queue-button');
@@ -278,7 +302,6 @@
         document.getElementById('viewConfirmedButton').addEventListener('click', () => socket.emit('ver-confirmados'));
         document.getElementById('clearDbButton').addEventListener('click', () => { if (confirm("¿Borrar TODAS las confirmaciones? Esta acción es irreversible.")) socket.emit('limpiar-confirmados'); });
 
-        // <<< NUEVA LÓGICA PARA BOTONES DE CONTROL DE COLA >>>
         togglePauseButton.addEventListener('click', async () => {
             const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue';
             togglePauseButton.disabled = true;
@@ -306,8 +329,6 @@
             }
         });
 
-
-        // --- Escuchas de Eventos de Socket.IO ---
         socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
         socket.on('nueva-confirmacion-recibida', () => { addLog({ text: '🔔 Nueva confirmación recibida, tabla actualizada', type: 'log-info' }); socket.emit('ver-confirmados'); });
@@ -326,12 +347,10 @@
         socket.on('initial-delay-settings', (settings) => { delay1Input.value = settings.delay1; delay2Input.value = settings.delay2; taskSeparationInput.value = settings.taskSeparation; });
         socket.on('delay-settings-updated', (settings) => { delay1Input.value = settings.delay1; delay2Input.value = settings.delay2; taskSeparationInput.value = settings.taskSeparation; addLog({ text: '🔧 La configuración de delays ha sido actualizada desde otro cliente.', type: 'log-warn' }); });
         
-        // <<< NUEVO EVENTO PARA ACTUALIZAR UI DE CONTROL DE COLA >>>
         socket.on('queue-status-update', ({ isPaused }) => {
             isQueuePausedByAdmin = isPaused;
             const buttonTextSpan = togglePauseButton.querySelector('span');
             const buttonIcon = togglePauseButton.querySelector('i');
-
             if (isPaused) {
                 queueStatusIndicator.textContent = 'Pausada';
                 queueStatusIndicator.className = 'status-indicator paused';
