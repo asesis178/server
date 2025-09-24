@@ -20,6 +20,7 @@ const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
 const CONCURRENT_IMAGE_PROCESSING_LIMIT = 4;
+const MAX_RETRIES = 3; // <<< NUEVO: Número máximo de reintentos por tarea
 
 // --- VALIDACIONES DE INICIO ---
 if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) {
@@ -61,7 +62,8 @@ if (!fs.existsSync(activationImagePath)) {
 // --- ESTADO GLOBAL ---
 let taskQueue = [];
 let availableWorkers = new Set(senderPool.map((_, index) => index));
-let isQueuePaused = false;
+let isConversationCheckPaused = false;
+let isQueueProcessingPaused = false; // <<< NUEVO: Estado para pausar/reanudar el procesamiento
 
 let delaySettings = {
     delay1: 10000,
@@ -92,7 +94,18 @@ async function getConversationWindowState(recipientNumber) {
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
-        await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50) DEFAULT 'pending', creado_en TIMESTAMPTZ DEFAULT NOW());`);
+        // <<< MODIFICADO: Añadida columna retry_count a la tabla envios
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS envios (
+                id SERIAL PRIMARY KEY,
+                numero_destino VARCHAR(255) NOT NULL,
+                nombre_imagen VARCHAR(255),
+                remitente_usado VARCHAR(255),
+                estado VARCHAR(50) DEFAULT 'pending',
+                retry_count INTEGER DEFAULT 0,
+                creado_en TIMESTAMPTZ DEFAULT NOW()
+            );
+        `);
         await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTAMPTZ DEFAULT NOW());`);
         await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`);
         console.log("✅ Todas las tablas verificadas y/o creadas.");
@@ -107,9 +120,15 @@ async function initializeDatabase() {
 async function loadPendingTasks() {
     try {
         logAndEmit('🔄 Cargando tareas pendientes desde la base de datos...', 'log-info');
-        const res = await pool.query("SELECT id, numero_destino, nombre_imagen FROM envios WHERE estado = 'pending' OR estado = 'procesando' ORDER BY id ASC");
+        // <<< MODIFICADO: Carga el retry_count para cada tarea
+        const res = await pool.query("SELECT id, numero_destino, nombre_imagen, retry_count FROM envios WHERE estado IN ('pending', 'procesando', 'retry') ORDER BY id ASC");
         if (res.rowCount > 0) {
-            taskQueue = res.rows.map(row => ({ id: row.id, recipientNumber: row.numero_destino, imageName: row.nombre_imagen }));
+            taskQueue = res.rows.map(row => ({
+                id: row.id,
+                recipientNumber: row.numero_destino,
+                imageName: row.nombre_imagen,
+                retryCount: row.retry_count
+            }));
             logAndEmit(`✅ ${taskQueue.length} tarea(s) pendiente(s) cargada(s) en la cola.`, 'log-success');
         } else {
             logAndEmit('👍 No se encontraron tareas pendientes.', 'log-info');
@@ -127,6 +146,8 @@ io.on('connection', (socket) => {
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
     socket.emit('initial-delay-settings', delaySettings);
+    // <<< NUEVO: Informa al nuevo cliente del estado actual de la cola
+    socket.emit('queue-status-update', { isPaused: isQueueProcessingPaused });
 
     socket.on('request-window-status', async ({ number }) => {
         try {
@@ -216,14 +237,14 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
             await client.query('BEGIN');
             const newTasks = [];
             for (const imageName of allOptimizedImageNames) {
-                const result = await client.query('INSERT INTO envios (numero_destino, nombre_imagen, estado) VALUES ($1, $2, $3) RETURNING id, numero_destino, nombre_imagen', [destinationNumber, imageName, 'pending']);
-                newTasks.push({ id: result.rows[0].id, recipientNumber: result.rows[0].numero_destino, imageName: result.rows[0].nombre_imagen });
+                const result = await client.query('INSERT INTO envios (numero_destino, nombre_imagen, estado) VALUES ($1, $2, $3) RETURNING id, numero_destino, nombre_imagen, retry_count', [destinationNumber, imageName, 'pending']);
+                newTasks.push({ id: result.rows[0].id, recipientNumber: result.rows[0].numero_destino, imageName: result.rows[0].nombre_imagen, retryCount: result.rows[0].retry_count });
             }
             await client.query('COMMIT');
             taskQueue.push(...newTasks);
             logAndEmit(`✅ ${newTasks.length} tareas agregadas. Total en cola: ${taskQueue.length}`, 'log-success');
             io.emit('queue-update', taskQueue.length);
-            processQueue();
+            processQueue(); // Inicia el procesamiento si no estaba activo
             res.status(200).json({ message: `Se encolaron ${newTasks.length} envíos.` });
         } catch (dbError) {
             await client.query('ROLLBACK'); throw dbError;
@@ -233,6 +254,41 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
     } catch (error) {
         logAndEmit(`❌ Error al procesar ZIP: ${error.message}`, 'log-error');
         res.status(500).json({ message: "Error interno al procesar ZIP." });
+    }
+});
+
+// <<< NUEVOS ENDPOINTS PARA CONTROLAR LA COLA >>>
+app.post('/pause-queue', requireAuth, (req, res) => {
+    if (!isQueueProcessingPaused) {
+        isQueueProcessingPaused = true;
+        logAndEmit('⏸️ Cola de procesamiento pausada por el administrador.', 'log-warn');
+        io.emit('queue-status-update', { isPaused: true });
+    }
+    res.status(200).json({ message: 'Cola pausada.' });
+});
+
+app.post('/resume-queue', requireAuth, (req, res) => {
+    if (isQueueProcessingPaused) {
+        isQueueProcessingPaused = false;
+        logAndEmit('▶️ Cola de procesamiento reanudada por el administrador.', 'log-info');
+        io.emit('queue-status-update', { isPaused: false });
+        processQueue(); // Llama a procesar por si había quedado parada
+    }
+    res.status(200).json({ message: 'Cola reanudada.' });
+});
+
+app.post('/clear-queue', requireAuth, async (req, res) => {
+    logAndEmit('🗑️ Vaciando la cola de tareas pendientes...', 'log-warn');
+    const tasksToCancel = taskQueue.length;
+    taskQueue = []; // Limpia la cola en memoria
+    try {
+        await pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado IN ('pending', 'retry')");
+        logAndEmit(`✅ Cola vaciada. ${tasksToCancel} tarea(s) pendiente(s) cancelada(s) en la DB.`, 'log-success');
+        io.emit('queue-update', taskQueue.length);
+        res.status(200).json({ message: 'Cola de tareas pendientes limpiada.' });
+    } catch (dbError) {
+        logAndEmit(`❌ Error al actualizar tareas a 'cancelled' en la DB: ${dbError.message}`, 'log-error');
+        res.status(500).json({ message: 'Error al limpiar la cola en la base de datos.' });
     }
 });
 
@@ -267,10 +323,7 @@ app.post('/update-delays', requireAuth, (req, res) => {
     const d1 = parseInt(delay1, 10);
     const d2 = parseInt(delay2, 10);
     const sep = parseInt(taskSeparation, 10);
-
-    if (isNaN(d1) || isNaN(d2) || isNaN(sep) || d1 < 0 || d2 < 0 || sep < 0) {
-        return res.status(400).json({ message: 'Valores de delay inválidos.' });
-    }
+    if (isNaN(d1) || isNaN(d2) || isNaN(sep) || d1 < 0 || d2 < 0 || sep < 0) return res.status(400).json({ message: 'Valores de delay inválidos.' });
     delaySettings.delay1 = d1;
     delaySettings.delay2 = d2;
     delaySettings.taskSeparation = sep;
@@ -290,7 +343,8 @@ function releaseWorkerAndContinue(workerIndex) {
 }
 
 async function processQueue() {
-    if (isQueuePaused || availableWorkers.size === 0 || taskQueue.length === 0) {
+    // <<< MODIFICADO: Comprueba si la cola está pausada globalmente o por conversación
+    if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) {
         if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber));
         return;
     }
@@ -298,15 +352,15 @@ async function processQueue() {
     const windowState = await getConversationWindowState(nextRecipient);
     io.emit('window-status-update', windowState);
     if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') {
-        if (!isQueuePaused) {
-            logAndEmit(`⏸️ Cola pausada para ${nextRecipient}. Razón: ${windowState.details}`, 'log-warn');
-            isQueuePaused = true;
+        if (!isConversationCheckPaused) {
+            logAndEmit(`⏸️ Cola en espera para ${nextRecipient}. Razón: ${windowState.details}`, 'log-warn');
+            isConversationCheckPaused = true;
         }
-        setTimeout(() => { isQueuePaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 60000);
+        setTimeout(() => { isConversationCheckPaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 60000);
         return;
     }
-    isQueuePaused = false;
-    while (availableWorkers.size > 0 && taskQueue.length > 0) {
+    isConversationCheckPaused = false;
+    while (availableWorkers.size > 0 && taskQueue.length > 0 && !isQueueProcessingPaused) {
         const workerIndex = availableWorkers.values().next().value;
         availableWorkers.delete(workerIndex);
         io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
@@ -314,11 +368,11 @@ async function processQueue() {
         io.emit('queue-update', taskQueue.length);
         try {
             await pool.query('UPDATE envios SET estado = $1, remitente_usado = $2 WHERE id = $3', ['procesando', senderPool[workerIndex].id, task.id]);
-            logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id} para ${task.recipientNumber}.`, 'log-info');
+            logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id} (Intento ${task.retryCount + 1}).`, 'log-info');
             executeUnifiedSendSequence(task, workerIndex);
         } catch (dbError) {
             logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error');
-            taskQueue.unshift(task);
+            taskQueue.unshift(task); // Re-encola al principio si falla la DB
             io.emit('queue-update', taskQueue.length);
             releaseWorkerAndContinue(workerIndex);
         }
@@ -326,7 +380,7 @@ async function processQueue() {
 }
 
 async function executeUnifiedSendSequence(task, workerIndex) {
-    const { id, recipientNumber, imageName } = task;
+    const { id, recipientNumber, imageName, retryCount } = task; // <<< Obtenemos retryCount
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
@@ -336,7 +390,7 @@ async function executeUnifiedSendSequence(task, workerIndex) {
             logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para tarea #${id}. Activación...`, 'log-warn');
             taskQueue.unshift(task);
             io.emit('queue-update', taskQueue.length);
-            await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['pending', id]);
+            await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]);
             await executeActivationSequence(recipientNumber, workerIndex);
             return;
         }
@@ -349,11 +403,22 @@ async function executeUnifiedSendSequence(task, workerIndex) {
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
+        releaseWorkerAndContinue(workerIndex);
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para #${id}. Razón: ${errorMessage}`, 'log-error');
-        await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['fallido', id]);
-    } finally {
+        // <<< LÓGICA DE REINTENTOS >>>
+        if (retryCount < MAX_RETRIES) {
+            const newRetryCount = retryCount + 1;
+            task.retryCount = newRetryCount;
+            taskQueue.push(task); // Re-encola al final
+            io.emit('queue-update', taskQueue.length);
+            await pool.query("UPDATE envios SET estado = 'retry', retry_count = $1 WHERE id = $2", [newRetryCount, id]);
+            logAndEmit(`[Worker ${workerIndex}] 🔄 Tarea #${id} re-encolada para un nuevo intento (${newRetryCount}/${MAX_RETRIES}).`, 'log-warn');
+        } else {
+            await pool.query("UPDATE envios SET estado = 'failed_permanently' WHERE id = $1", [id]);
+            logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente tras ${MAX_RETRIES} intentos.`, 'log-error');
+        }
         releaseWorkerAndContinue(workerIndex);
     }
 }
