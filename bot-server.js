@@ -6,7 +6,8 @@ const { Server } = require("socket.io");
 const axios = require('axios');
 const path = require('path');
 const multer = require('multer');
-const fs = require('fs').promises; // Usamos la versión de promesas de fs para async/await
+const fsSync = require('fs'); // Para operaciones síncronas como existsSync
+const fs = require('fs').promises; // Para operaciones asíncronas con async/await
 const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 const sharp = require('sharp');
@@ -581,7 +582,7 @@ async function cleanupOldFiles(directory, maxAge) {
 async function startServer() {
     try {
         await createDirectories(); // Primero creamos los directorios
-        if (!fs.existsSync(activationImagePath)) { // Verificamos asset después de crear dirs
+        if (!fsSync.existsSync(activationImagePath)) { // <<< CAMBIO AQUÍ: Usamos fsSync
              console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no se encuentra en la carpeta '/assets'.`);
              process.exit(1);
         }
