@@ -493,6 +493,7 @@ async function executeUnifiedSendSequence(task, workerIndex) {
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+
     try {
         const windowState = await getConversationWindowState(recipientNumber);
         if (windowState.status === 'INACTIVE') {
@@ -500,22 +501,37 @@ async function executeUnifiedSendSequence(task, workerIndex) {
             taskQueue.unshift(task);
             io.emit('queue-update', taskQueue.length);
             await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]);
+            // Liberamos el worker aquí porque la tarea de activación se encargará de sí misma
+            releaseWorkerAndContinue(workerIndex); 
             await executeActivationSequence(recipientNumber, workerIndex);
-            return;
+            return; // Salimos para no ejecutar el resto
         }
+
         logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" (gratis) para #${id}...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS });
+        
         await delay(delaySettings.delay1);
+        
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
+        
         await delay(delaySettings.delay2);
-        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`; // <<< MODIFICADO: Busca la imagen en /pending
+        
+        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`;
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
+
+        // Añadimos el delay de cortesía
+        await delay(2000); 
+        
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
+
+        // Si todo fue bien, liberamos el worker
         releaseWorkerAndContinue(workerIndex);
+
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para #${id}. Razón: ${errorMessage}`, 'log-error');
+        
         if (retryCount < MAX_RETRIES) {
             const newRetryCount = retryCount + 1;
             task.retryCount = newRetryCount;
@@ -527,6 +543,8 @@ async function executeUnifiedSendSequence(task, workerIndex) {
             await pool.query("UPDATE envios SET estado = 'failed_permanently' WHERE id = $1", [id]);
             logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente.`, 'log-error');
         }
+
+        // Si algo falló, TAMBIÉN liberamos el worker
         releaseWorkerAndContinue(workerIndex);
     }
 }
