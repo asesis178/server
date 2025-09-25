@@ -6,7 +6,8 @@ const { Server } = require("socket.io");
 const axios = require('axios');
 const path = require('path');
 const multer = require('multer');
-const fs = require('fs').promises;
+const fsSync = require('fs'); // Para operaciones síncronas
+const fs = require('fs').promises; // Para operaciones asíncronas
 const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 const sharp = require('sharp');
@@ -137,17 +138,7 @@ io.on('connection', (socket) => {
     socket.on('ver-confirmados', async () => { try { const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en DESC"); socket.emit('datos-confirmados', result.rows); } catch (dbError) { console.error("Error al obtener confirmados:", dbError); } });
     socket.on('ver-no-confirmados', async () => { try { const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_no_confirmado, registrado_en FROM no_confirmados ORDER BY registrado_en DESC"); socket.emit('datos-no-confirmados', result.rows); } catch (dbError) { console.error("Error al obtener no confirmados:", dbError); } });
     socket.on('limpiar-confirmados', async () => { try { await pool.query('TRUNCATE TABLE confirmados'); io.emit('datos-confirmados', []); logAndEmit("✅ DB de confirmados limpiada.", 'log-success'); } catch (dbError) { logAndEmit("❌ Error al limpiar la DB de confirmados.", 'log-error'); } });
-
-    // <<< NUEVO EVENTO PARA LIMPIAR NO CONFIRMADOS >>>
-    socket.on('limpiar-no-confirmados', async () => {
-        try {
-            await pool.query('TRUNCATE TABLE no_confirmados');
-            io.emit('datos-no-confirmados', []);
-            logAndEmit("✅ DB de 'no confirmados' limpiada.", 'log-success');
-        } catch (dbError) {
-            logAndEmit("❌ Error al limpiar la DB de 'no confirmados'.", 'log-error');
-        }
-    });
+    socket.on('limpiar-no-confirmados', async () => { try { await pool.query('TRUNCATE TABLE no_confirmados'); io.emit('datos-no-confirmados', []); logAndEmit("✅ DB de 'no confirmados' limpiada.", 'log-success'); } catch (dbError) { logAndEmit("❌ Error al limpiar la DB de 'no confirmados'.", 'log-error'); } });
 });
 
 // --- ENDPOINTS ---
@@ -231,34 +222,8 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
     } catch (error) { logAndEmit(`❌ Error al procesar ZIP: ${error.message}`, 'log-error'); res.status(500).json({ message: "Error interno al procesar ZIP." }); }
 });
 
-app.get('/download-confirmed-excel', requireAuth, async (req, res) => {
-    try {
-        const result = await pool.query('SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en ASC');
-        const workbook = new exceljs.Workbook(); const worksheet = workbook.addWorksheet('Confirmados');
-        worksheet.columns = [
-            { header: 'Cédula', key: 'cedula', width: 15 }, { header: 'Fecha de Nacimiento', key: 'fecha_nacimiento', width: 20 },
-            { header: 'Número de Contacto', key: 'numero_confirmado', width: 20 }, { header: 'Fecha de Confirmación', key: 'confirmado_en', width: 25 }
-        ];
-        worksheet.addRows(result.rows);
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename="confirmados.xlsx"');
-        await workbook.xlsx.write(res); res.end();
-    } catch (error) { logAndEmit(`❌ Error generando Excel: ${error.message}`, 'log-error'); res.status(500).send("Error al generar el archivo Excel."); }
-});
-
-async function createAndSendZip(res, directory, zipName) {
-    try {
-        const files = await fs.readdir(directory);
-        if (files.length === 0) return res.status(404).json({ message: `No hay imágenes en la categoría '${zipName}'.` });
-        const zip = new AdmZip();
-        for (const file of files) { zip.addLocalFile(path.join(directory, file)); }
-        const zipBuffer = zip.toBuffer(); const finalZipName = `${zipName}-${new Date().toISOString().split('T')[0]}.zip`;
-        await fs.writeFile(path.join(ZIPS_DIR, finalZipName), zipBuffer);
-        res.setHeader('Content-Type', 'application/zip'); res.setHeader('Content-Disposition', `attachment; filename=${finalZipName}`);
-        res.send(zipBuffer);
-    } catch (error) { logAndEmit(`❌ Error generando ZIP de ${zipName}: ${error.message}`, 'log-error'); res.status(500).send(`Error al generar el ZIP de ${zipName}.`); }
-}
-
+app.get('/download-confirmed-excel', requireAuth, async (req, res) => { try { const result = await pool.query('SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en ASC'); const workbook = new exceljs.Workbook(); const worksheet = workbook.addWorksheet('Confirmados'); worksheet.columns = [{ header: 'Cédula', key: 'cedula', width: 15 }, { header: 'Fecha de Nacimiento', key: 'fecha_nacimiento', width: 20 }, { header: 'Número de Contacto', key: 'numero_confirmado', width: 20 }, { header: 'Fecha de Confirmación', key: 'confirmado_en', width: 25 }]; worksheet.addRows(result.rows); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', 'attachment; filename="confirmados.xlsx"'); await workbook.xlsx.write(res); res.end(); } catch (error) { logAndEmit(`❌ Error generando Excel: ${error.message}`, 'log-error'); res.status(500).send("Error al generar el archivo Excel."); } });
+async function createAndSendZip(res, directory, zipName) { try { const files = await fs.readdir(directory); if (files.length === 0) return res.status(404).json({ message: `No hay imágenes en la categoría '${zipName}'.` }); const zip = new AdmZip(); for (const file of files) { zip.addLocalFile(path.join(directory, file)); } const zipBuffer = zip.toBuffer(); const finalZipName = `${zipName}-${new Date().toISOString().split('T')[0]}.zip`; await fs.writeFile(path.join(ZIPS_DIR, finalZipName), zipBuffer); res.setHeader('Content-Type', 'application/zip'); res.setHeader('Content-Disposition', `attachment; filename=${finalZipName}`); res.send(zipBuffer); } catch (error) { logAndEmit(`❌ Error generando ZIP de ${zipName}: ${error.message}`, 'log-error'); res.status(500).send(`Error al generar el ZIP de ${zipName}.`); } }
 app.get('/download-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, CONFIRMED_ARCHIVE_DIR, 'confirmados'); });
 app.get('/download-not-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, NOT_CONFIRMED_ARCHIVE_DIR, 'no-confirmados'); });
 app.post('/pause-queue', requireAuth, (req, res) => { if (!isQueueProcessingPaused) { isQueueProcessingPaused = true; logAndEmit('⏸️ Cola pausada.', 'log-warn'); io.emit('queue-status-update', { isPaused: true }); } res.status(200).json({ message: 'Cola pausada.' }); });
@@ -271,7 +236,52 @@ app.post('/update-delays', requireAuth, (req, res) => { const { delay1, delay2, 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function releaseWorkerAndContinue(workerIndex) { availableWorkers.add(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); setTimeout(processQueue, delaySettings.taskSeparation); }
 async function processQueue() { if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) { if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber)); return; } const nextRecipient = taskQueue[0].recipientNumber; const windowState = await getConversationWindowState(nextRecipient); io.emit('window-status-update', windowState); if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') { if (!isConversationCheckPaused) { logAndEmit(`⏸️ Cola en espera para ${nextRecipient}: ${windowState.details}`, 'log-warn'); isConversationCheckPaused = true; } setTimeout(() => { isConversationCheckPaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 60000); return; } isConversationCheckPaused = false; while (availableWorkers.size > 0 && taskQueue.length > 0 && !isQueueProcessingPaused) { const workerIndex = availableWorkers.values().next().value; availableWorkers.delete(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); const task = taskQueue.shift(); io.emit('queue-update', taskQueue.length); try { await pool.query('UPDATE envios SET estado = $1, remitente_usado = $2 WHERE id = $3', ['procesando', senderPool[workerIndex].id, task.id]); logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id} (Intento ${task.retryCount + 1}).`, 'log-info'); executeUnifiedSendSequence(task, workerIndex); } catch (dbError) { logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); releaseWorkerAndContinue(workerIndex); } } }
-async function executeUnifiedSendSequence(task, workerIndex) { const { id, recipientNumber, imageName, retryCount } = task; const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; try { const windowState = await getConversationWindowState(recipientNumber); if (windowState.status === 'INACTIVE') { logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para #${id}. Activando...`, 'log-warn'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]); releaseWorkerAndContinue(workerIndex); await executeActivationSequence(recipientNumber, workerIndex); return; } logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`; await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(2000); logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success'); await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]); releaseWorkerAndContinue(workerIndex); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló secuencia para #${id}: ${errorMessage}`, 'log-error'); if (retryCount < MAX_RETRIES) { const newRetryCount = retryCount + 1; task.retryCount = newRetryCount; taskQueue.push(task); io.emit('queue-update', taskQueue.length); await pool.query("UPDATE envios SET estado = 'retry', retry_count = $1 WHERE id = $2", [newRetryCount, id]); logAndEmit(`[Worker ${workerIndex}] 🔄 Tarea #${id} re-encolada (Intento ${newRetryCount}/${MAX_RETRIES}).`, 'log-warn'); } else { await pool.query("UPDATE envios SET estado = 'failed_permanently' WHERE id = $1", [id]); logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente.`, 'log-error'); } releaseWorkerAndContinue(workerIndex); } }
+
+async function executeUnifiedSendSequence(task, workerIndex) {
+    const { id, recipientNumber, imageName, retryCount } = task;
+    const sender = senderPool[workerIndex];
+    const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
+    const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+    try {
+        const windowState = await getConversationWindowState(recipientNumber);
+        if (windowState.status === 'INACTIVE') {
+            logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para #${id}. Activando...`, 'log-warn');
+            taskQueue.unshift(task);
+            io.emit('queue-update', taskQueue.length);
+            await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]);
+            // <<< CORRECCIÓN DEL BUG DE BUCLE INFINITO >>>
+            // El worker NO se libera. Se dedica a la tarea de activación.
+            await executeActivationSequence(recipientNumber, workerIndex);
+            return; // Salimos. La otra función liberará al worker.
+        }
+        logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info');
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS });
+        await delay(delaySettings.delay1);
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
+        await delay(delaySettings.delay2);
+        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`;
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
+        await delay(2000);
+        logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
+        await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
+        releaseWorkerAndContinue(workerIndex);
+    } catch (error) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló secuencia para #${id}: ${errorMessage}`, 'log-error');
+        if (retryCount < MAX_RETRIES) {
+            const newRetryCount = retryCount + 1;
+            task.retryCount = newRetryCount;
+            taskQueue.push(task);
+            io.emit('queue-update', taskQueue.length);
+            await pool.query("UPDATE envios SET estado = 'retry', retry_count = $1 WHERE id = $2", [newRetryCount, id]);
+            logAndEmit(`[Worker ${workerIndex}] 🔄 Tarea #${id} re-encolada (Intento ${newRetryCount}/${MAX_RETRIES}).`, 'log-warn');
+        } else {
+            await pool.query("UPDATE envios SET estado = 'failed_permanently' WHERE id = $1", [id]);
+            logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente.`, 'log-error');
+        }
+        releaseWorkerAndContinue(workerIndex);
+    }
+}
 async function executeActivationSequence(recipientNumber, workerIndex) { const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; const publicImageUrl = `${RENDER_EXTERNAL_URL}/assets/${ACTIVATION_IMAGE_NAME}`; try { logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando Template (pago)...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(5000); await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW()) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`, [recipientNumber]); logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success'); const state = await getConversationWindowState(recipientNumber); io.emit('window-status-update', state); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló activación: ${errorMessage}`, 'log-error'); } finally { releaseWorkerAndContinue(workerIndex); } }
 async function cleanupOldFiles(directory, maxAge) { try { const files = await fs.readdir(directory); for (const file of files) { const filePath = path.join(directory, file); const stats = await fs.stat(filePath); if (stats.isDirectory()) { await cleanupOldFiles(filePath, maxAge); } else if (Date.now() - stats.mtime.getTime() > maxAge) { await fs.unlink(filePath); console.log(`🧹 Archivo antiguo borrado: ${filePath}`); } } } catch (err) { if (err.code !== 'ENOENT') { console.error(`Error al limpiar ${directory}:`, err); } } }
 
@@ -279,7 +289,7 @@ async function cleanupOldFiles(directory, maxAge) { try { const files = await fs
 async function startServer() {
     try {
         await createDirectories();
-        if (!require('fs').existsSync(activationImagePath)) { console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no está en /assets.`); process.exit(1); }
+        if (!fsSync.existsSync(activationImagePath)) { console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no está en /assets.`); process.exit(1); }
         await initializeDatabase();
         await loadPendingTasks();
         server.listen(PORT, () => {
@@ -294,4 +304,4 @@ async function startServer() {
     } catch (error) { console.error("🔥🔥🔥 FALLO CRÍTICO AL INICIAR SERVIDOR 🔥🔥🔥", error); process.exit(1); }
 }
 
-startServer()
+startServer();
