@@ -131,7 +131,6 @@
             </form>
         </div>
 
-        <!-- <<< NUEVO CARD PARA REPORTES Y DESCARGAS >>> -->
         <div class="card" style="--card-index: 4;">
             <h2><i class="fa-solid fa-download" style="color: var(--color-text-secondary);"></i> Reportes y Descargas</h2>
             <div class="button-group">
@@ -191,11 +190,12 @@
             </table>
         </div>
 
-        <!-- <<< NUEVO CARD PARA TABLA DE NO CONFIRMADOS >>> -->
         <div class="card" style="--card-index: 8;">
             <h2><i class="fa-solid fa-times-circle" style="color: var(--color-danger);"></i> Respuestas: No Confirmados</h2>
             <div class="button-group">
                <button id="viewNotConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar Lista</button>
+               <!-- <<< NUEVO BOTÓN PARA LIMPIAR NO CONFIRMADOS >>> -->
+               <button id="clearNotConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar Lista</button>
            </div>
            <table>
                <thead> <tr> <th>Cédula</th> <th>Fecha Nacimiento</th> <th>Número</th> <th>Fecha Registro</th> </tr> </thead>
@@ -226,12 +226,12 @@
         const clearQueueButton = document.getElementById('clear-queue-button');
         let isQueuePausedByAdmin = false;
 
-        // <<< NUEVOS SELECTORES PARA TABLAS Y BOTONES >>>
         const confirmedTableBody = document.getElementById('confirmedTableBody');
         const notConfirmedTableBody = document.getElementById('notConfirmedTableBody');
         const viewConfirmedButton = document.getElementById('viewConfirmedButton');
         const clearConfirmedButton = document.getElementById('clearConfirmedButton');
         const viewNotConfirmedButton = document.getElementById('viewNotConfirmedButton');
+        const clearNotConfirmedButton = document.getElementById('clearNotConfirmedButton'); // <<< Selector para el nuevo botón
         const downloadExcelButton = document.getElementById('download-excel-button');
         const downloadConfirmedZipButton = document.getElementById('download-confirmed-zip-button');
         const downloadNotConfirmedZipButton = document.getElementById('download-not-confirmed-zip-button');
@@ -243,22 +243,7 @@
         }
 
         // --- Lógica de Formularios y Botones ---
-        document.getElementById('zip-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const form = e.target, button = form.querySelector('button'), originalButtonContent = button.innerHTML, formData = new FormData(form);
-            if (!formData.get('destinationNumber') || !formData.get('zipFile').name) return addLog({ text: '❌ Completa todos los campos.', type: 'log-error' });
-            button.disabled = true; button.innerHTML = `<span class="spinner"></span> Procesando...`;
-            addLog({ text: 'Subiendo y procesando ZIP...', type: 'log-info' });
-            try {
-                const response = await fetch('/subir-zip', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message);
-                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-                form.reset();
-            } catch (error) { addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' }); }
-            finally { button.disabled = false; button.innerHTML = originalButtonContent; }
-        });
-
+        document.getElementById('zip-form').addEventListener('submit', async (e) => { e.preventDefault(); const form = e.target, button = form.querySelector('button'), originalButtonContent = button.innerHTML, formData = new FormData(form); if (!formData.get('destinationNumber') || !formData.get('zipFile').name) return addLog({ text: '❌ Completa todos los campos.', type: 'log-error' }); button.disabled = true; button.innerHTML = `<span class="spinner"></span> Procesando...`; addLog({ text: 'Subiendo y procesando ZIP...', type: 'log-info' }); try { const response = await fetch('/subir-zip', { method: 'POST', body: formData }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); form.reset(); } catch (error) { addLog({ text: `❌ Error al subir: ${error.message}`, type: 'log-error' }); } finally { button.disabled = false; button.innerHTML = originalButtonContent; } });
         document.getElementById('check-status-form').addEventListener('submit', (e) => { e.preventDefault(); const number = document.getElementById('checkNumber').value.trim(); if (number) socket.emit('request-window-status', { number }); });
         document.getElementById('manual-activate-form').addEventListener('submit', async (e) => { e.preventDefault(); const number = document.getElementById('activateNumber').value.trim(); if (!number) return; try { const response = await fetch('/manual-activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ destinationNumber: number }) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error en activación manual: ${error.message}`, type: 'log-error' }); } });
         delayForm.addEventListener('submit', async (e) => { e.preventDefault(); const button = e.target.querySelector('button'); const data = { delay1: delay1Input.value, delay2: delay2Input.value, taskSeparation: taskSeparationInput.value, }; button.disabled = true; try { const response = await fetch('/update-delays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error al actualizar delays: ${error.message}`, type: 'log-error' }); } finally { button.disabled = false; } });
@@ -266,38 +251,20 @@
 
         togglePauseButton.addEventListener('click', async () => { const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue'; togglePauseButton.disabled = true; try { const response = await fetch(endpoint, { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: `❌ Error al ${isQueuePausedByAdmin ? 'reanudar' : 'pausar'} la cola.`, type: 'log-error' }); } finally { togglePauseButton.disabled = false; } });
         clearQueueButton.addEventListener('click', async () => { if (confirm("¿Estás SEGURO de que quieres borrar TODAS las tareas pendientes?")) { clearQueueButton.disabled = true; try { const response = await fetch('/clear-queue', { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: '❌ Error al limpiar la cola.', type: 'log-error' }); } finally { clearQueueButton.disabled = false; } } });
-
-        // <<< LÓGICA PARA LOS NUEVOS BOTONES >>>
+        
         viewConfirmedButton.addEventListener('click', () => socket.emit('ver-confirmados'));
         clearConfirmedButton.addEventListener('click', () => { if (confirm("¿Borrar TODAS las confirmaciones?")) socket.emit('limpiar-confirmados'); });
         viewNotConfirmedButton.addEventListener('click', () => socket.emit('ver-no-confirmados'));
+        // <<< EVENT LISTENER PARA EL NUEVO BOTÓN >>>
+        clearNotConfirmedButton.addEventListener('click', () => { if (confirm("¿Borrar TODA la lista de 'no confirmados'?")) socket.emit('limpiar-no-confirmados'); });
+        
         downloadExcelButton.addEventListener('click', () => window.location.href = '/download-confirmed-excel');
         downloadConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-confirmed-zip');
         downloadNotConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-not-confirmed-zip');
 
         // --- Funciones para renderizar las tablas ---
-        function renderConfirmedTable(data) {
-            confirmedTableBody.innerHTML = '';
-            if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay confirmaciones registradas.</td></tr>'; return; }
-            data.forEach(row => {
-                const tr = document.createElement('tr');
-                const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A';
-                const formattedDateConf = new Date(row.confirmado_en).toLocaleString('es-ES');
-                tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_confirmado}</td><td>${formattedDateConf}</td>`;
-                confirmedTableBody.appendChild(tr);
-            });
-        }
-        function renderNotConfirmedTable(data) {
-            notConfirmedTableBody.innerHTML = '';
-            if (!data || data.length === 0) { notConfirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay "no confirmados" registrados.</td></tr>'; return; }
-            data.forEach(row => {
-                const tr = document.createElement('tr');
-                const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A';
-                const formattedDateReg = new Date(row.registrado_en).toLocaleString('es-ES');
-                tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_no_confirmado}</td><td>${formattedDateReg}</td>`;
-                notConfirmedTableBody.appendChild(tr);
-            });
-        }
+        function renderConfirmedTable(data) { confirmedTableBody.innerHTML = ''; if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay confirmaciones.</td></tr>'; return; } data.forEach(row => { const tr = document.createElement('tr'); const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A'; const formattedDateConf = new Date(row.confirmado_en).toLocaleString('es-ES'); tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_confirmado}</td><td>${formattedDateConf}</td>`; confirmedTableBody.appendChild(tr); }); }
+        function renderNotConfirmedTable(data) { notConfirmedTableBody.innerHTML = ''; if (!data || data.length === 0) { notConfirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay "no confirmados".</td></tr>'; return; } data.forEach(row => { const tr = document.createElement('tr'); const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A'; const formattedDateReg = new Date(row.registrado_en).toLocaleString('es-ES'); tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_no_confirmado}</td><td>${formattedDateReg}</td>`; notConfirmedTableBody.appendChild(tr); }); }
 
         // --- Escuchas de Eventos de Socket.IO ---
         socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); socket.emit('ver-no-confirmados'); });
@@ -313,15 +280,8 @@
         socket.on('queue-status-update', ({ isPaused }) => {
             isQueuePausedByAdmin = isPaused;
             const buttonTextSpan = togglePauseButton.querySelector('span'); const buttonIcon = togglePauseButton.querySelector('i');
-            if (isPaused) {
-                queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused';
-                buttonTextSpan.textContent = 'Reanudar Cola'; buttonIcon.className = 'fa-solid fa-play';
-                togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
-            } else {
-                queueStatusIndicator.textContent = 'Activa'; queueStatusIndicator.className = 'status-indicator running';
-                buttonTextSpan.textContent = 'Pausar Cola'; buttonIcon.className = 'fa-solid fa-pause';
-                togglePauseButton.classList.remove('btn-primary'); togglePauseButton.classList.add('btn-secondary');
-            }
+            if (isPaused) { queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused'; buttonTextSpan.textContent = 'Reanudar Cola'; buttonIcon.className = 'fa-solid fa-play'; togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
+            } else { queueStatusIndicator.textContent = 'Activa'; queueStatusIndicator.className = 'status-indicator running'; buttonTextSpan.textContent = 'Pausar Cola'; buttonIcon.className = 'fa-solid fa-pause'; togglePauseButton.classList.remove('btn-primary'); togglePauseButton.classList.add('btn-secondary'); }
         });
     </script>
 </body>
