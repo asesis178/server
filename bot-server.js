@@ -6,11 +6,12 @@ const { Server } = require("socket.io");
 const axios = require('axios');
 const path = require('path');
 const multer = require('multer');
-const fs = require('fs');
+const fs = require('fs').promises; // Usamos la versión de promesas de fs para async/await
 const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 const sharp = require('sharp');
 const basicAuth = require('express-basic-auth');
+const exceljs = require('exceljs'); // <<< NUEVA LIBRERÍA: Para crear archivos Excel
 
 // --- CONFIGURACIÓN ---
 const PHONE_NUMBER_IDS = process.env.PHONE_NUMBER_ID ? process.env.PHONE_NUMBER_ID.split(',') : [];
@@ -20,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
 const CONCURRENT_IMAGE_PROCESSING_LIMIT = 4;
-const MAX_RETRIES = 3; // <<< NUEVO: Número máximo de reintentos por tarea
+const MAX_RETRIES = 3;
 
 // --- VALIDACIONES DE INICIO ---
 if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) {
@@ -45,25 +46,38 @@ const server = http.createServer(app);
 const io = new Server(server);
 app.use(express.json());
 
+// <<< NUEVA ESTRUCTURA DE DIRECTORIOS INTELIGENTE >>>
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const PENDING_DIR = path.join(UPLOADS_DIR, 'pending');
+const ARCHIVED_DIR = path.join(UPLOADS_DIR, 'archived');
+const CONFIRMED_ARCHIVE_DIR = path.join(ARCHIVED_DIR, 'confirmed');
+const NOT_CONFIRMED_ARCHIVE_DIR = path.join(ARCHIVED_DIR, 'not_confirmed');
+const ZIPS_DIR = path.join(__dirname, 'zips');
 const TEMP_DIR = path.join(__dirname, 'temp');
 const ASSETS_DIR = path.join(__dirname, 'assets');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
+
+// Función para crear todos los directorios necesarios al inicio
+async function createDirectories() {
+    const dirs = [UPLOADS_DIR, PENDING_DIR, ARCHIVED_DIR, CONFIRMED_ARCHIVE_DIR, NOT_CONFIRMED_ARCHIVE_DIR, ZIPS_DIR, TEMP_DIR, ASSETS_DIR];
+    for (const dir of dirs) {
+        try {
+            await fs.mkdir(dir, { recursive: true });
+        } catch (error) {
+            console.error(`❌ Error creando el directorio ${dir}:`, error);
+            process.exit(1);
+        }
+    }
+    console.log('✅ Todos los directorios están listos.');
+}
 
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 50 * 1024 * 1024 } });
 const activationImagePath = path.join(ASSETS_DIR, ACTIVATION_IMAGE_NAME);
-if (!fs.existsSync(activationImagePath)) {
-    console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no se encuentra en la carpeta '/assets'.`);
-    process.exit(1);
-}
 
 // --- ESTADO GLOBAL ---
 let taskQueue = [];
 let availableWorkers = new Set(senderPool.map((_, index) => index));
 let isConversationCheckPaused = false;
-let isQueueProcessingPaused = false; // <<< NUEVO: Estado para pausar/reanudar el procesamiento
+let isQueueProcessingPaused = false;
 
 let delaySettings = {
     delay1: 10000,
@@ -94,19 +108,10 @@ async function getConversationWindowState(recipientNumber) {
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
-        // <<< MODIFICADO: Añadida columna retry_count a la tabla envios
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS envios (
-                id SERIAL PRIMARY KEY,
-                numero_destino VARCHAR(255) NOT NULL,
-                nombre_imagen VARCHAR(255),
-                remitente_usado VARCHAR(255),
-                estado VARCHAR(50) DEFAULT 'pending',
-                retry_count INTEGER DEFAULT 0,
-                creado_en TIMESTAMPTZ DEFAULT NOW()
-            );
-        `);
-        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, mensaje_confirmacion VARCHAR(255), confirmado_en TIMESTAMPTZ DEFAULT NOW());`);
+        await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50) DEFAULT 'pending', retry_count INTEGER DEFAULT 0, creado_en TIMESTAMPTZ DEFAULT NOW());`);
+        // <<< NUEVAS TABLAS PARA CONFIRMADOS Y NO CONFIRMADOS >>>
+        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, confirmado_en TIMESTAMPTZ DEFAULT NOW());`);
+        await client.query(`CREATE TABLE IF NOT EXISTS no_confirmados (id SERIAL PRIMARY KEY, numero_no_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, registrado_en TIMESTAMPTZ DEFAULT NOW());`);
         await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`);
         console.log("✅ Todas las tablas verificadas y/o creadas.");
     } catch (err) {
@@ -120,15 +125,9 @@ async function initializeDatabase() {
 async function loadPendingTasks() {
     try {
         logAndEmit('🔄 Cargando tareas pendientes desde la base de datos...', 'log-info');
-        // <<< MODIFICADO: Carga el retry_count para cada tarea
         const res = await pool.query("SELECT id, numero_destino, nombre_imagen, retry_count FROM envios WHERE estado IN ('pending', 'procesando', 'retry') ORDER BY id ASC");
         if (res.rowCount > 0) {
-            taskQueue = res.rows.map(row => ({
-                id: row.id,
-                recipientNumber: row.numero_destino,
-                imageName: row.nombre_imagen,
-                retryCount: row.retry_count
-            }));
+            taskQueue = res.rows.map(row => ({ id: row.id, recipientNumber: row.numero_destino, imageName: row.nombre_imagen, retryCount: row.retry_count }));
             logAndEmit(`✅ ${taskQueue.length} tarea(s) pendiente(s) cargada(s) en la cola.`, 'log-success');
         } else {
             logAndEmit('👍 No se encontraron tareas pendientes.', 'log-info');
@@ -146,7 +145,6 @@ io.on('connection', (socket) => {
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: activeWorkersCount });
     socket.emit('initial-delay-settings', delaySettings);
-    // <<< NUEVO: Informa al nuevo cliente del estado actual de la cola
     socket.emit('queue-status-update', { isPaused: isQueueProcessingPaused });
 
     socket.on('request-window-status', async ({ number }) => {
@@ -156,81 +154,126 @@ io.on('connection', (socket) => {
             if (state.status === 'ACTIVE' || state.status === 'COOL_DOWN') logType = 'log-success';
             if (state.status === 'INACTIVE' || state.status === 'EXPIRING_SOON') logType = 'log-warn';
             socket.emit('status-update', { text: `[Consulta] Estado para ${number}: <strong>${state.status}</strong> (${state.details})`, type: logType });
-        } catch (error) {
-            logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error');
-        }
+        } catch (error) { logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error'); }
     });
-
+    // <<< MODIFICADO: Ahora el panel pide las listas por separado >>>
     socket.on('ver-confirmados', async () => {
         try {
-            const result = await pool.query("SELECT numero_confirmado, mensaje_confirmacion, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
             socket.emit('datos-confirmados', result.rows);
-        } catch (dbError) {
-            console.error("Error al obtener confirmados:", dbError);
-        }
+        } catch (dbError) { console.error("Error al obtener confirmados:", dbError); }
     });
-
+    socket.on('ver-no-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_no_confirmado, registrado_en FROM no_confirmados ORDER BY registrado_en DESC");
+            socket.emit('datos-no-confirmados', result.rows);
+        } catch (dbError) { console.error("Error al obtener no confirmados:", dbError); }
+    });
     socket.on('limpiar-confirmados', async () => {
         try {
             await pool.query('TRUNCATE TABLE confirmados');
             io.emit('datos-confirmados', []);
             logAndEmit("✅ DB de confirmados limpiada.", 'log-success');
-        } catch (dbError) {
-            logAndEmit("❌ Error al limpiar la DB de confirmados.", 'log-error');
-        }
+        } catch (dbError) { logAndEmit("❌ Error al limpiar la DB de confirmados.", 'log-error'); }
     });
 });
 
 // --- ENDPOINTS ---
 app.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, 'panel.html')));
-app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/uploads/pending', express.static(PENDING_DIR)); // Servir imágenes pendientes para visualización
 app.use('/assets', express.static(ASSETS_DIR));
+app.use('/zips', requireAuth, express.static(ZIPS_DIR)); // Servir ZIPs generados de forma segura
 app.get('/', (req, res) => res.send('Servidor activo. Visita /panel para usar el control.'));
 
+// <<< WEBHOOK TOTALMENTE RECONSTRUIDO >>>
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message || message.type !== 'text') return;
+
     const from = message.from;
     const textBody = message.text.body.trim();
-    const match = textBody.match(/confirmado\s+(\d{8})/i);
-    if (match) {
-        const cedula = match[1];
-        logAndEmit(`[Confirmación Pasiva] ✅ Detectada cédula ${cedula} de ${from}`, 'log-success');
-        try {
-            await pool.query(`INSERT INTO confirmados (numero_confirmado, mensaje_confirmacion) VALUES ($1, $2)`, [from, cedula]);
-            io.emit('nueva-confirmacion-recibida');
-        } catch (dbError) {
-            logAndEmit(`[Confirmación Pasiva] ❌ Error al guardar en DB.`, 'log-error');
+
+    // Expresión regular para capturar los datos. Formato esperado:
+    // (Confirmado|No Confirmado) | CI: {cedula} | Nac: {dd/mm/yyyy}
+    const regex = /(Confirmado|No Confirmado)\s*\|\s*CI:\s*(\d+)\s*\|\s*Nac:\s*(\d{2}\/\d{2}\/\d{4})/;
+    const match = textBody.match(regex);
+
+    if (!match) return; // Si el mensaje no tiene el formato, lo ignoramos.
+
+    const [, status, cedula, fechaNacStr] = match;
+    const isConfirmed = status === 'Confirmado';
+    
+    // Convertir fecha de dd/mm/yyyy a yyyy-mm-dd para la DB
+    const [day, month, year] = fechaNacStr.split('/');
+    const fechaNac = `${year}-${month}-${day}`;
+
+    const tableName = isConfirmed ? 'confirmados' : 'no_confirmados';
+    const numberColumn = isConfirmed ? 'numero_confirmado' : 'numero_no_confirmado';
+
+    try {
+        await pool.query(
+            `INSERT INTO ${tableName} (cedula, fecha_nacimiento, ${numberColumn}) VALUES ($1, $2, $3)
+             ON CONFLICT (cedula) DO NOTHING`, // Evita duplicados
+            [cedula, fechaNac, from]
+        );
+        logAndEmit(`[Webhook] ✅ Recibido: ${status} para CI ${cedula}.`, 'log-success');
+        io.emit('nueva-respuesta-recibida'); // Notifica al panel para que actualice ambas tablas
+        
+        // Mover el archivo de imagen
+        const pendingFiles = await fs.readdir(PENDING_DIR);
+        const imageToMove = pendingFiles.find(file => file.includes(cedula));
+        
+        if (imageToMove) {
+            const oldPath = path.join(PENDING_DIR, imageToMove);
+            const newDir = isConfirmed ? CONFIRMED_ARCHIVE_DIR : NOT_CONFIRMED_ARCHIVE_DIR;
+            const newPath = path.join(newDir, imageToMove);
+            await fs.rename(oldPath, newPath);
+            logAndEmit(`[Webhook] 🗂️ Imagen para CI ${cedula} archivada en '${isConfirmed ? 'confirmados' : 'no confirmados'}'.`, 'log-info');
+        } else {
+            logAndEmit(`[Webhook] ⚠️ No se encontró imagen pendiente para CI ${cedula}.`, 'log-warn');
         }
+    } catch (dbError) {
+        logAndEmit(`[Webhook] ❌ Error al procesar CI ${cedula}: ${dbError.message}`, 'log-error');
     }
 });
+
 
 // --- ENDPOINTS DE ADMINISTRACIÓN (PROTEGIDOS) ---
 app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) => {
     const { destinationNumber } = req.body;
     const zipFile = req.file;
     if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
-    const zipFilePath = zipFile.path;
     try {
-        const zip = new AdmZip(zipFilePath);
+        const zip = new AdmZip(zipFile.path);
         const imageEntries = zip.getEntries().filter(e => !e.isDirectory && /\.(jpg|jpeg|png)$/i.test(e.entryName));
-        fs.unlinkSync(zipFilePath);
-        if (imageEntries.length === 0) return res.status(400).json({ message: "El ZIP no contiene imágenes." });
-        logAndEmit(`📦 ZIP recibido con ${imageEntries.length} imágenes. Optimizando...`, 'log-info');
-        const allOptimizedImageNames = [];
-        for (let i = 0; i < imageEntries.length; i += CONCURRENT_IMAGE_PROCESSING_LIMIT) {
-            const chunk = imageEntries.slice(i, i + CONCURRENT_IMAGE_PROCESSING_LIMIT);
-            const promises = chunk.map(entry => {
-                const originalFileName = path.basename(entry.entryName);
-                const optimizedFileName = `opt-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${originalFileName.replace(/\s/g, '_')}`;
-                const targetPath = path.join(UPLOADS_DIR, optimizedFileName);
-                return sharp(entry.getData()).resize({ width: 1920, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(targetPath)
-                    .then(() => optimizedFileName).catch(err => { logAndEmit(`⚠️ No se pudo optimizar ${originalFileName}. Saltando...`, 'log-warn'); return null; });
-            });
-            allOptimizedImageNames.push(...(await Promise.all(promises)).filter(n => n !== null));
-        }
-        if (allOptimizedImageNames.length === 0) return res.status(400).json({ message: "Ninguna imagen pudo ser procesada." });
+        await fs.unlink(zipFile.path); // Borrar ZIP temporal
+
+        if (imageEntries.length === 0) return res.status(400).json({ message: "El ZIP no contiene imágenes válidas." });
+        logAndEmit(`📦 ZIP recibido. Optimizando ${imageEntries.length} imágenes...`, 'log-info');
+        
+        const processingPromises = imageEntries.map(entry => {
+            const originalFileName = path.basename(entry.entryName);
+            // Aseguramos que el nombre del archivo contiene la cédula (asumimos que está en el nombre original)
+            const cedulaMatch = originalFileName.match(/\d+/);
+            if (!cedulaMatch) {
+                logAndEmit(`⚠️ Imagen ${originalFileName} saltada: no contiene una cédula en el nombre.`, 'log-warn');
+                return Promise.resolve(null);
+            }
+            const cedula = cedulaMatch[0];
+            const optimizedFileName = `opt-${Date.now()}-${cedula}-${originalFileName.replace(/\s/g, '_')}`;
+            // <<< MODIFICADO: Guarda en el directorio PENDING >>>
+            const targetPath = path.join(PENDING_DIR, optimizedFileName);
+            
+            return sharp(entry.getData()).resize({ width: 1920, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(targetPath)
+                .then(() => optimizedFileName)
+                .catch(err => { logAndEmit(`⚠️ No se pudo optimizar ${originalFileName}. Saltando...`, 'log-warn'); return null; });
+        });
+
+        const allOptimizedImageNames = (await Promise.all(processingPromises)).filter(Boolean);
+
+        if (allOptimizedImageNames.length === 0) return res.status(400).json({ message: "Ninguna imagen pudo ser procesada o ninguna contenía una cédula." });
+        
         logAndEmit(`💾 Guardando ${allOptimizedImageNames.length} tareas en DB...`, 'log-info');
         const client = await pool.connect();
         try {
@@ -244,7 +287,7 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
             taskQueue.push(...newTasks);
             logAndEmit(`✅ ${newTasks.length} tareas agregadas. Total en cola: ${taskQueue.length}`, 'log-success');
             io.emit('queue-update', taskQueue.length);
-            processQueue(); // Inicia el procesamiento si no estaba activo
+            processQueue();
             res.status(200).json({ message: `Se encolaron ${newTasks.length} envíos.` });
         } catch (dbError) {
             await client.query('ROLLBACK'); throw dbError;
@@ -257,7 +300,71 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
     }
 });
 
-// <<< NUEVOS ENDPOINTS PARA CONTROLAR LA COLA >>>
+// <<< ENDPOINTS DE REPORTES Y DESCARGAS >>>
+app.get('/download-confirmed-excel', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en ASC');
+        
+        const workbook = new exceljs.Workbook();
+        const worksheet = workbook.addWorksheet('Confirmados');
+        
+        worksheet.columns = [
+            { header: 'Cédula', key: 'cedula', width: 15 },
+            { header: 'Fecha de Nacimiento', key: 'fecha_nacimiento', width: 20 },
+            { header: 'Número de Contacto', key: 'numero_confirmado', width: 20 },
+            { header: 'Fecha de Confirmación', key: 'confirmado_en', width: 25 }
+        ];
+
+        worksheet.addRows(result.rows);
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="confirmados.xlsx"');
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        logAndEmit(`❌ Error generando Excel de confirmados: ${error.message}`, 'log-error');
+        res.status(500).send("Error al generar el archivo Excel.");
+    }
+});
+
+async function createAndSendZip(res, directory, zipName) {
+    try {
+        const files = await fs.readdir(directory);
+        if (files.length === 0) {
+            return res.status(404).json({ message: `No hay imágenes en la categoría '${zipName}'.` });
+        }
+
+        const zip = new AdmZip();
+        for (const file of files) {
+            zip.addLocalFile(path.join(directory, file));
+        }
+
+        const zipBuffer = zip.toBuffer();
+        const finalZipName = `${zipName}-${new Date().toISOString().split('T')[0]}.zip`;
+
+        // Guardar preventivo
+        await fs.writeFile(path.join(ZIPS_DIR, finalZipName), zipBuffer);
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename=${finalZipName}`);
+        res.send(zipBuffer);
+        
+    } catch (error) {
+        logAndEmit(`❌ Error generando ZIP de ${zipName}: ${error.message}`, 'log-error');
+        res.status(500).send(`Error al generar el ZIP de ${zipName}.`);
+    }
+}
+
+app.get('/download-confirmed-zip', requireAuth, (req, res) => {
+    createAndSendZip(res, CONFIRMED_ARCHIVE_DIR, 'confirmados');
+});
+
+app.get('/download-not-confirmed-zip', requireAuth, (req, res) => {
+    createAndSendZip(res, NOT_CONFIRMED_ARCHIVE_DIR, 'no-confirmados');
+});
+
+
 app.post('/pause-queue', requireAuth, (req, res) => {
     if (!isQueueProcessingPaused) {
         isQueueProcessingPaused = true;
@@ -272,7 +379,7 @@ app.post('/resume-queue', requireAuth, (req, res) => {
         isQueueProcessingPaused = false;
         logAndEmit('▶️ Cola de procesamiento reanudada por el administrador.', 'log-info');
         io.emit('queue-status-update', { isPaused: false });
-        processQueue(); // Llama a procesar por si había quedado parada
+        processQueue();
     }
     res.status(200).json({ message: 'Cola reanudada.' });
 });
@@ -280,17 +387,20 @@ app.post('/resume-queue', requireAuth, (req, res) => {
 app.post('/clear-queue', requireAuth, async (req, res) => {
     logAndEmit('🗑️ Vaciando la cola de tareas pendientes...', 'log-warn');
     const tasksToCancel = taskQueue.length;
-    taskQueue = []; // Limpia la cola en memoria
+    taskQueue = [];
     try {
         await pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado IN ('pending', 'retry')");
         logAndEmit(`✅ Cola vaciada. ${tasksToCancel} tarea(s) pendiente(s) cancelada(s) en la DB.`, 'log-success');
         io.emit('queue-update', taskQueue.length);
         res.status(200).json({ message: 'Cola de tareas pendientes limpiada.' });
     } catch (dbError) {
-        logAndEmit(`❌ Error al actualizar tareas a 'cancelled' en la DB: ${dbError.message}`, 'log-error');
-        res.status(500).json({ message: 'Error al limpiar la cola en la base de datos.' });
+        logAndEmit(`❌ Error al cancelar tareas en la DB: ${dbError.message}`, 'log-error');
+        res.status(500).json({ message: 'Error al limpiar la cola en la DB.' });
     }
 });
+
+// ... (El resto de endpoints de admin y lógica de procesamiento de colas y secuencias de envío permanecen sin cambios)
+// ... (Es exactamente el mismo código que ya teníamos, lo incluyo para que sea completo)
 
 app.post('/manual-activate', requireAuth, upload.none(), async (req, res) => {
     const { destinationNumber } = req.body;
@@ -332,7 +442,6 @@ app.post('/update-delays', requireAuth, (req, res) => {
     res.status(200).json({ message: 'Configuración de delays actualizada exitosamente.' });
 });
 
-// --- LÓGICA DE PROCESAMIENTO DE TAREAS ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function releaseWorkerAndContinue(workerIndex) {
@@ -343,7 +452,6 @@ function releaseWorkerAndContinue(workerIndex) {
 }
 
 async function processQueue() {
-    // <<< MODIFICADO: Comprueba si la cola está pausada globalmente o por conversación
     if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) {
         if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber));
         return;
@@ -372,7 +480,7 @@ async function processQueue() {
             executeUnifiedSendSequence(task, workerIndex);
         } catch (dbError) {
             logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error');
-            taskQueue.unshift(task); // Re-encola al principio si falla la DB
+            taskQueue.unshift(task);
             io.emit('queue-update', taskQueue.length);
             releaseWorkerAndContinue(workerIndex);
         }
@@ -380,7 +488,7 @@ async function processQueue() {
 }
 
 async function executeUnifiedSendSequence(task, workerIndex) {
-    const { id, recipientNumber, imageName, retryCount } = task; // <<< Obtenemos retryCount
+    const { id, recipientNumber, imageName, retryCount } = task;
     const sender = senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
@@ -399,7 +507,7 @@ async function executeUnifiedSendSequence(task, workerIndex) {
         await delay(delaySettings.delay1);
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
         await delay(delaySettings.delay2);
-        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/${imageName}`;
+        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`; // <<< MODIFICADO: Busca la imagen en /pending
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
@@ -407,17 +515,16 @@ async function executeUnifiedSendSequence(task, workerIndex) {
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         logAndEmit(`[Worker ${workerIndex}] 🚫 Falló la secuencia para #${id}. Razón: ${errorMessage}`, 'log-error');
-        // <<< LÓGICA DE REINTENTOS >>>
         if (retryCount < MAX_RETRIES) {
             const newRetryCount = retryCount + 1;
             task.retryCount = newRetryCount;
-            taskQueue.push(task); // Re-encola al final
+            taskQueue.push(task);
             io.emit('queue-update', taskQueue.length);
             await pool.query("UPDATE envios SET estado = 'retry', retry_count = $1 WHERE id = $2", [newRetryCount, id]);
-            logAndEmit(`[Worker ${workerIndex}] 🔄 Tarea #${id} re-encolada para un nuevo intento (${newRetryCount}/${MAX_RETRIES}).`, 'log-warn');
+            logAndEmit(`[Worker ${workerIndex}] 🔄 Tarea #${id} re-encolada para intento (${newRetryCount}/${MAX_RETRIES}).`, 'log-warn');
         } else {
             await pool.query("UPDATE envios SET estado = 'failed_permanently' WHERE id = $1", [id]);
-            logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente tras ${MAX_RETRIES} intentos.`, 'log-error');
+            logAndEmit(`[Worker ${workerIndex}] ☠️ Tarea #${id} falló permanentemente.`, 'log-error');
         }
         releaseWorkerAndContinue(workerIndex);
     }
@@ -449,38 +556,54 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
 }
 
 // --- TAREAS DE MANTENIMIENTO ---
-function cleanupOldFiles(directory, maxAge) {
-    fs.readdir(directory, (err, files) => {
-        if (err) return console.error(`Error al leer el directorio ${directory}:`, err);
-        files.forEach(file => {
+async function cleanupOldFiles(directory, maxAge) {
+    try {
+        const files = await fs.readdir(directory);
+        for (const file of files) {
             const filePath = path.join(directory, file);
-            fs.stat(filePath, (err, stats) => {
-                if (err) return;
-                if (Date.now() - stats.mtime.getTime() > maxAge) {
-                    fs.unlink(filePath, (unlinkErr) => {
-                        if (unlinkErr) console.error(`Error al borrar ${file}:`, unlinkErr);
-                        else console.log(`🧹 Archivo antiguo borrado: ${file}`);
-                    });
-                }
-            });
-        });
-    });
+            const stats = await fs.stat(filePath);
+            if (stats.isDirectory()) {
+                await cleanupOldFiles(filePath, maxAge); // Limpieza recursiva
+            } else if (Date.now() - stats.mtime.getTime() > maxAge) {
+                await fs.unlink(filePath);
+                console.log(`🧹 Archivo antiguo borrado: ${filePath}`);
+            }
+        }
+    } catch (err) {
+        // Ignoramos errores si el directorio no existe, etc.
+        if (err.code !== 'ENOENT') {
+            console.error(`Error al limpiar el directorio ${directory}:`, err);
+        }
+    }
 }
 
 // --- INICIO DEL SERVIDOR ---
 async function startServer() {
     try {
+        await createDirectories(); // Primero creamos los directorios
+        if (!fs.existsSync(activationImagePath)) { // Verificamos asset después de crear dirs
+             console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no se encuentra en la carpeta '/assets'.`);
+             process.exit(1);
+        }
         await initializeDatabase();
         await loadPendingTasks();
+        
         server.listen(PORT, () => {
             console.log(`🚀 Servidor iniciado en puerto ${PORT}. Pool de ${senderPool.length} remitente(s) listo.`);
             const unaSemanaEnMs = 7 * 24 * 60 * 60 * 1000;
-            console.log('🧹 Limpieza inicial de archivos antiguos...');
-            cleanupOldFiles(UPLOADS_DIR, unaSemanaEnMs);
+
+            // Limpieza inicial
+            console.log('🧹 Limpieza inicial de archivos archivados y ZIPs antiguos...');
+            cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs);
+            cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs);
+            
+            // Limpieza periódica
             setInterval(() => {
-                console.log('🧹 Ejecutando limpieza periódica...');
-                cleanupOldFiles(UPLOADS_DIR, unaSemanaEnMs);
+                console.log('🧹 Ejecutando limpieza periódica de archivados y ZIPs...');
+                cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs);
+                cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs);
             }, 24 * 60 * 60 * 1000);
+
             if (taskQueue.length > 0) {
                 logAndEmit('▶️ Iniciando procesamiento de la cola cargada.', 'log-info');
                 processQueue();

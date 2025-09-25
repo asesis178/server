@@ -131,23 +131,33 @@
             </form>
         </div>
 
+        <!-- <<< NUEVO CARD PARA REPORTES Y DESCARGAS >>> -->
         <div class="card" style="--card-index: 4;">
+            <h2><i class="fa-solid fa-download" style="color: var(--color-text-secondary);"></i> Reportes y Descargas</h2>
+            <div class="button-group">
+                <button id="download-excel-button" class="btn btn-secondary"><i class="fa-solid fa-file-excel" style="color: var(--color-success);"></i> Descargar Excel (Confirmados)</button>
+                <button id="download-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive" style="color: var(--color-primary);"></i> Descargar ZIP (Confirmados)</button>
+                <button id="download-not-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive" style="color: var(--color-danger);"></i> Descargar ZIP (No Confirmados)</button>
+            </div>
+        </div>
+        
+        <div class="card" style="--card-index: 5;">
             <h2><i class="fa-solid fa-terminal" style="color: var(--color-text-secondary);"></i> Log de Actividad</h2>
             <div id="log-container"></div>
         </div>
 
-        <div class="card" style="--card-index: 5;">
+        <div class="card" style="--card-index: 6;">
             <h2><i class="fa-solid fa-wrench" style="color: var(--color-text-secondary);"></i> Herramientas y Configuración</h2>
             <form id="check-status-form">
-                <label for="checkNumber">Consultar Estado de Conversación para un Número</label>
+                <label for="checkNumber">Consultar Estado de Conversación</label>
                 <input type="text" id="checkNumber" name="checkNumber" placeholder="Ej: 5491122334455" required>
-                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-search"></i> Consultar Estado</button>
+                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-search"></i> Consultar</button>
             </form>
             <hr>
             <form id="manual-activate-form">
-                <label for="activateNumber">Activar Conversación Manualmente para un Número</label>
+                <label for="activateNumber">Activar Conversación Manualmente</label>
                 <input type="text" id="activateNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
-                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-power-off"></i> Iniciar Activación</button>
+                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-power-off"></i> Activar</button>
             </form>
              <hr>
             <form id="delay-settings-form">
@@ -157,7 +167,7 @@
                 <input type="number" id="delay2" name="delay2" min="0" required>
                 <label for="taskSeparation">Separación entre Tareas (ms)</label>
                 <input type="number" id="taskSeparation" name="taskSeparation" min="0" required>
-                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-clock"></i> Actualizar Tiempos</button>
+                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-clock"></i> Actualizar</button>
             </form>
             <hr>
             <form id="debug-form">
@@ -165,84 +175,74 @@
                 <input type="text" id="debugNumber" name="recipientNumber" placeholder="Ej: 5491122334455" required>
                 <label for="newTimestamp">Nueva Fecha y Hora de Activación</label>
                 <input type="datetime-local" id="newTimestamp" name="newTimestamp" required>
-                <button type="submit" class="btn btn-danger"><i class="fa-solid fa-exclamation-triangle"></i> Forzar Actualización</button>
+                <button type="submit" class="btn btn-danger"><i class="fa-solid fa-exclamation-triangle"></i> Forzar</button>
             </form>
         </div>
 
-        <div class="card" style="--card-index: 6;">
-             <h2><i class="fa-solid fa-check-circle" style="color: var(--color-success);"></i> Confirmaciones Recibidas</h2>
+        <div class="card" style="--card-index: 7;">
+             <h2><i class="fa-solid fa-check-circle" style="color: var(--color-success);"></i> Respuestas: Confirmados</h2>
              <div class="button-group">
                 <button id="viewConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar Lista</button>
-                <button id="clearDbButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar Lista de Confirmaciones</button>
+                <button id="clearConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar Lista</button>
             </div>
             <table>
-                <thead> <tr> <th>Número</th> <th>Cédula</th> <th>Fecha de Confirmación</th> </tr> </thead>
+                <thead> <tr> <th>Cédula</th> <th>Fecha Nacimiento</th> <th>Número</th> <th>Fecha Confirmación</th> </tr> </thead>
                 <tbody id="confirmedTableBody"></tbody>
             </table>
         </div>
+
+        <!-- <<< NUEVO CARD PARA TABLA DE NO CONFIRMADOS >>> -->
+        <div class="card" style="--card-index: 8;">
+            <h2><i class="fa-solid fa-times-circle" style="color: var(--color-danger);"></i> Respuestas: No Confirmados</h2>
+            <div class="button-group">
+               <button id="viewNotConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar Lista</button>
+           </div>
+           <table>
+               <thead> <tr> <th>Cédula</th> <th>Fecha Nacimiento</th> <th>Número</th> <th>Fecha Registro</th> </tr> </thead>
+               <tbody id="notConfirmedTableBody"></tbody>
+           </table>
+       </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // <<< INICIO DE LA LÓGICA DEL THEME SWITCHER MODIFICADA >>>
-        
-        // Función centralizada para establecer el tema
-        function setTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme); // Guarda la preferencia en localStorage
-        }
-
-        const themeSwitcher = document.getElementById('theme-switcher');
-        themeSwitcher.addEventListener('click', () => {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            setTheme(newTheme);
-        });
-
-        // Script de inicialización que se ejecuta al cargar la página
-        (() => {
-            const savedTheme = localStorage.getItem('theme');
-            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-            if (savedTheme) {
-                // Si hay un tema guardado, úsalo
-                setTheme(savedTheme);
-            } else if (prefersDark) {
-                // Si no hay nada guardado, pero el sistema prefiere oscuro, usa oscuro
-                setTheme('dark');
-            }
-            // Si no, se queda con 'light' que está por defecto en el HTML
-        })();
-        
-        // <<< FIN DE LA LÓGICA DEL THEME SWITCHER MODIFICADA >>>
+        function setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
+        document.getElementById('theme-switcher').addEventListener('click', () => { const currentTheme = document.documentElement.getAttribute('data-theme'); const newTheme = currentTheme === 'dark' ? 'light' : 'dark'; setTheme(newTheme); });
+        (() => { const savedTheme = localStorage.getItem('theme'); const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; if (savedTheme) { setTheme(savedTheme); } else if (prefersDark) { setTheme('dark'); } })();
         
         const socket = io();
         const logContainer = document.getElementById('log-container');
         const queueCount = document.getElementById('queue-count');
         const availableNumbersCount = document.getElementById('available-numbers-count');
         const activeNumbersCount = document.getElementById('active-numbers-count');
-        const confirmedTableBody = document.getElementById('confirmedTableBody');
         const conversationStatusIndicator = document.getElementById('conversation-status-indicator');
         const conversationStatusDetails = document.getElementById('conversation-status-details');
         const delayForm = document.getElementById('delay-settings-form');
         const delay1Input = document.getElementById('delay1');
         const delay2Input = document.getElementById('delay2');
         const taskSeparationInput = document.getElementById('taskSeparation');
-
         const queueStatusIndicator = document.getElementById('queue-status-indicator');
         const togglePauseButton = document.getElementById('toggle-pause-button');
         const clearQueueButton = document.getElementById('clear-queue-button');
         let isQueuePausedByAdmin = false;
 
+        // <<< NUEVOS SELECTORES PARA TABLAS Y BOTONES >>>
+        const confirmedTableBody = document.getElementById('confirmedTableBody');
+        const notConfirmedTableBody = document.getElementById('notConfirmedTableBody');
+        const viewConfirmedButton = document.getElementById('viewConfirmedButton');
+        const clearConfirmedButton = document.getElementById('clearConfirmedButton');
+        const viewNotConfirmedButton = document.getElementById('viewNotConfirmedButton');
+        const downloadExcelButton = document.getElementById('download-excel-button');
+        const downloadConfirmedZipButton = document.getElementById('download-confirmed-zip-button');
+        const downloadNotConfirmedZipButton = document.getElementById('download-not-confirmed-zip-button');
+
         function addLog(message) {
-            const entry = document.createElement('div');
-            entry.className = `log-entry ${message.type || 'log-info'}`;
-            const timestamp = new Date().toLocaleTimeString('es-ES');
-            entry.innerHTML = `<span>[${timestamp}]</span> ${message.text}`;
-            logContainer.appendChild(entry);
-            logContainer.scrollTop = logContainer.scrollHeight;
+            const entry = document.createElement('div'); entry.className = `log-entry ${message.type || 'log-info'}`;
+            const timestamp = new Date().toLocaleTimeString('es-ES'); entry.innerHTML = `<span>[${timestamp}]</span> ${message.text}`;
+            logContainer.appendChild(entry); logContainer.scrollTop = logContainer.scrollHeight;
         }
 
+        // --- Lógica de Formularios y Botones ---
         document.getElementById('zip-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const form = e.target, button = form.querySelector('button'), originalButtonContent = button.innerHTML, formData = new FormData(form);
@@ -260,111 +260,67 @@
         });
 
         document.getElementById('check-status-form').addEventListener('submit', (e) => { e.preventDefault(); const number = document.getElementById('checkNumber').value.trim(); if (number) socket.emit('request-window-status', { number }); });
+        document.getElementById('manual-activate-form').addEventListener('submit', async (e) => { e.preventDefault(); const number = document.getElementById('activateNumber').value.trim(); if (!number) return; try { const response = await fetch('/manual-activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ destinationNumber: number }) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error en activación manual: ${error.message}`, type: 'log-error' }); } });
+        delayForm.addEventListener('submit', async (e) => { e.preventDefault(); const button = e.target.querySelector('button'); const data = { delay1: delay1Input.value, delay2: delay2Input.value, taskSeparation: taskSeparationInput.value, }; button.disabled = true; try { const response = await fetch('/update-delays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error al actualizar delays: ${error.message}`, type: 'log-error' }); } finally { button.disabled = false; } });
+        document.getElementById('debug-form').addEventListener('submit', async (e) => { e.preventDefault(); const data = Object.fromEntries(new FormData(e.target).entries()); if (!data.recipientNumber || !data.newTimestamp) return; try { const response = await fetch('/debug-update-window', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' }); } });
 
-        document.getElementById('manual-activate-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const number = document.getElementById('activateNumber').value.trim();
-            if (!number) return;
-            try {
-                const response = await fetch('/manual-activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ destinationNumber: number }) });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message);
-                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-            } catch (error) { addLog({ text: `❌ Error en activación manual: ${error.message}`, type: 'log-error' }); }
-        });
+        togglePauseButton.addEventListener('click', async () => { const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue'; togglePauseButton.disabled = true; try { const response = await fetch(endpoint, { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: `❌ Error al ${isQueuePausedByAdmin ? 'reanudar' : 'pausar'} la cola.`, type: 'log-error' }); } finally { togglePauseButton.disabled = false; } });
+        clearQueueButton.addEventListener('click', async () => { if (confirm("¿Estás SEGURO de que quieres borrar TODAS las tareas pendientes?")) { clearQueueButton.disabled = true; try { const response = await fetch('/clear-queue', { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: '❌ Error al limpiar la cola.', type: 'log-error' }); } finally { clearQueueButton.disabled = false; } } });
 
-        delayForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const button = e.target.querySelector('button');
-            const data = { delay1: delay1Input.value, delay2: delay2Input.value, taskSeparation: taskSeparationInput.value, };
-            button.disabled = true;
-            try {
-                const response = await fetch('/update-delays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message);
-                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-            } catch (error) { addLog({ text: `❌ Error al actualizar delays: ${error.message}`, type: 'log-error' }); }
-            finally { button.disabled = false; }
-        });
+        // <<< LÓGICA PARA LOS NUEVOS BOTONES >>>
+        viewConfirmedButton.addEventListener('click', () => socket.emit('ver-confirmados'));
+        clearConfirmedButton.addEventListener('click', () => { if (confirm("¿Borrar TODAS las confirmaciones?")) socket.emit('limpiar-confirmados'); });
+        viewNotConfirmedButton.addEventListener('click', () => socket.emit('ver-no-confirmados'));
+        downloadExcelButton.addEventListener('click', () => window.location.href = '/download-confirmed-excel');
+        downloadConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-confirmed-zip');
+        downloadNotConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-not-confirmed-zip');
 
-        document.getElementById('debug-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target).entries());
-            if (!data.recipientNumber || !data.newTimestamp) return;
-            try {
-                const response = await fetch('/debug-update-window', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message);
-                addLog({ text: `✅ ${result.message}`, type: 'log-success' });
-            } catch (error) { addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' }); }
-        });
+        // --- Funciones para renderizar las tablas ---
+        function renderConfirmedTable(data) {
+            confirmedTableBody.innerHTML = '';
+            if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay confirmaciones registradas.</td></tr>'; return; }
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A';
+                const formattedDateConf = new Date(row.confirmado_en).toLocaleString('es-ES');
+                tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_confirmado}</td><td>${formattedDateConf}</td>`;
+                confirmedTableBody.appendChild(tr);
+            });
+        }
+        function renderNotConfirmedTable(data) {
+            notConfirmedTableBody.innerHTML = '';
+            if (!data || data.length === 0) { notConfirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay "no confirmados" registrados.</td></tr>'; return; }
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A';
+                const formattedDateReg = new Date(row.registrado_en).toLocaleString('es-ES');
+                tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_no_confirmado}</td><td>${formattedDateReg}</td>`;
+                notConfirmedTableBody.appendChild(tr);
+            });
+        }
 
-        document.getElementById('viewConfirmedButton').addEventListener('click', () => socket.emit('ver-confirmados'));
-        document.getElementById('clearDbButton').addEventListener('click', () => { if (confirm("¿Borrar TODAS las confirmaciones? Esta acción es irreversible.")) socket.emit('limpiar-confirmados'); });
-
-        togglePauseButton.addEventListener('click', async () => {
-            const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue';
-            togglePauseButton.disabled = true;
-            try {
-                const response = await fetch(endpoint, { method: 'POST' });
-                if (!response.ok) throw new Error('Error de servidor');
-            } catch (error) {
-                addLog({ text: `❌ Error al ${isQueuePausedByAdmin ? 'reanudar' : 'pausar'} la cola.`, type: 'log-error' });
-            } finally {
-                togglePauseButton.disabled = false;
-            }
-        });
-
-        clearQueueButton.addEventListener('click', async () => {
-            if (confirm("¿Estás SEGURO de que quieres borrar TODAS las tareas pendientes de la cola? Esta acción no se puede deshacer.")) {
-                clearQueueButton.disabled = true;
-                try {
-                    const response = await fetch('/clear-queue', { method: 'POST' });
-                    if (!response.ok) throw new Error('Error de servidor');
-                } catch (error) {
-                    addLog({ text: '❌ Error al limpiar la cola.', type: 'log-error' });
-                } finally {
-                    clearQueueButton.disabled = false;
-                }
-            }
-        });
-
-        socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); });
+        // --- Escuchas de Eventos de Socket.IO ---
+        socket.on('connect', () => { addLog({ text: 'Conectado al servidor.', type: 'log-success' }); socket.emit('ver-confirmados'); socket.emit('ver-no-confirmados'); });
         socket.on('queue-update', (size) => { queueCount.textContent = size; });
-        socket.on('nueva-confirmacion-recibida', () => { addLog({ text: '🔔 Nueva confirmación recibida, tabla actualizada', type: 'log-info' }); socket.emit('ver-confirmados'); });
+        socket.on('nueva-respuesta-recibida', () => { addLog({ text: '🔔 Nueva respuesta recibida, actualizando tablas.', type: 'log-info' }); socket.emit('ver-confirmados'); socket.emit('ver-no-confirmados'); });
         socket.on('workers-status-update', (data) => { availableNumbersCount.textContent = data.available; activeNumbersCount.textContent = data.active; });
         socket.on('window-status-update', (data) => { conversationStatusIndicator.textContent = data.status.replace(/_/g, ' '); conversationStatusIndicator.className = `status-indicator ${data.status.toLowerCase()}`; conversationStatusDetails.textContent = data.details || '\xA0'; });
         socket.on('status-update', addLog);
-        socket.on('datos-confirmados', (data) => {
-            confirmedTableBody.innerHTML = '';
-            if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No hay confirmaciones registradas.</td></tr>'; return; }
-            data.forEach(row => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${row.numero_confirmado}</td><td>${row.mensaje_confirmacion}</td><td>${new Date(row.confirmado_en).toLocaleString('es-ES')}</td>`;
-                confirmedTableBody.appendChild(tr);
-            });
-        });
+        socket.on('datos-confirmados', renderConfirmedTable);
+        socket.on('datos-no-confirmados', renderNotConfirmedTable);
         socket.on('initial-delay-settings', (settings) => { delay1Input.value = settings.delay1; delay2Input.value = settings.delay2; taskSeparationInput.value = settings.taskSeparation; });
-        socket.on('delay-settings-updated', (settings) => { delay1Input.value = settings.delay1; delay2Input.value = settings.delay2; taskSeparationInput.value = settings.taskSeparation; addLog({ text: '🔧 La configuración de delays ha sido actualizada desde otro cliente.', type: 'log-warn' }); });
-        
+        socket.on('delay-settings-updated', (settings) => { delay1Input.value = settings.delay1; delay2Input.value = settings.delay2; taskSeparationInput.value = settings.taskSeparation; addLog({ text: '🔧 La configuración de delays ha sido actualizada.', type: 'log-warn' }); });
         socket.on('queue-status-update', ({ isPaused }) => {
             isQueuePausedByAdmin = isPaused;
-            const buttonTextSpan = togglePauseButton.querySelector('span');
-            const buttonIcon = togglePauseButton.querySelector('i');
+            const buttonTextSpan = togglePauseButton.querySelector('span'); const buttonIcon = togglePauseButton.querySelector('i');
             if (isPaused) {
-                queueStatusIndicator.textContent = 'Pausada';
-                queueStatusIndicator.className = 'status-indicator paused';
-                buttonTextSpan.textContent = 'Reanudar Cola';
-                buttonIcon.className = 'fa-solid fa-play';
-                togglePauseButton.classList.remove('btn-secondary');
-                togglePauseButton.classList.add('btn-primary');
+                queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused';
+                buttonTextSpan.textContent = 'Reanudar Cola'; buttonIcon.className = 'fa-solid fa-play';
+                togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
             } else {
-                queueStatusIndicator.textContent = 'Activa';
-                queueStatusIndicator.className = 'status-indicator running';
-                buttonTextSpan.textContent = 'Pausar Cola';
-                buttonIcon.className = 'fa-solid fa-pause';
-                togglePauseButton.classList.remove('btn-primary');
-                togglePauseButton.classList.add('btn-secondary');
+                queueStatusIndicator.textContent = 'Activa'; queueStatusIndicator.className = 'status-indicator running';
+                buttonTextSpan.textContent = 'Pausar Cola'; buttonIcon.className = 'fa-solid fa-pause';
+                togglePauseButton.classList.remove('btn-primary'); togglePauseButton.classList.add('btn-secondary');
             }
         });
     </script>
