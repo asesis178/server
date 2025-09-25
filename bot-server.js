@@ -85,6 +85,17 @@ function logAndEmit(text, type = 'log-info') {
     io.emit('status-update', { text, type });
 }
 
+function getFormattedTimestamp() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+
+    return `${year}-${month}-${day}_${hours}-${minutes}`;
+}
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- LÓGICA DE GESTIÓN DE VENTANA ---
@@ -328,7 +339,9 @@ app.get('/download-confirmed-excel', requireAuth, async (req, res) => {
         ];
         worksheet.addRows(result.rows);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename="confirmados.xlsx"');
+        const timestamp = getFormattedTimestamp();
+        const fileName = `confirmaciones_bps (${timestamp}).xlsx`;
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         await workbook.xlsx.write(res);
         res.end();
     } catch (error) {
@@ -348,10 +361,11 @@ async function createAndSendZip(res, directory, zipName) {
             zip.addLocalFile(path.join(directory, file));
         }
         const zipBuffer = zip.toBuffer();
-        const finalZipName = `${zipName}-${new Date().toISOString().split('T')[0]}.zip`;
+        const timestamp = getFormattedTimestamp();
+        const finalZipName = `${zipName}_(${timestamp}).zip`;
         await fs.writeFile(path.join(ZIPS_DIR, finalZipName), zipBuffer);
         res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename=${finalZipName}`);
+        res.setHeader('Content-Disposition', `attachment; filename="${finalZipName}"`);
         res.send(zipBuffer);
     } catch (error) {
         logAndEmit(`❌ Error generando ZIP de ${zipName}: ${error.message}`, 'log-error');
@@ -359,8 +373,8 @@ async function createAndSendZip(res, directory, zipName) {
     }
 }
 
-app.get('/download-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, CONFIRMED_ARCHIVE_DIR, 'confirmados'); });
-app.get('/download-not-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, NOT_CONFIRMED_ARCHIVE_DIR, 'no-confirmados'); });
+app.get('/download-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, CONFIRMED_ARCHIVE_DIR, 'cedulas_confirmados'); });
+app.get('/download-not-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, NOT_CONFIRMED_ARCHIVE_DIR, 'cedulas_no_confirmados'); });
 app.post('/pause-queue', requireAuth, (req, res) => { if (!isQueueProcessingPaused) { isQueueProcessingPaused = true; logAndEmit('⏸️ Cola pausada.', 'log-warn'); io.emit('queue-status-update', { isPaused: true }); } res.status(200).json({ message: 'Cola pausada.' }); });
 app.post('/resume-queue', requireAuth, (req, res) => { if (isQueueProcessingPaused) { isQueueProcessingPaused = false; logAndEmit('▶️ Cola reanudada.', 'log-info'); io.emit('queue-status-update', { isPaused: false }); processQueue(); } res.status(200).json({ message: 'Cola reanudada.' }); });
 app.post('/clear-queue', requireAuth, async (req, res) => { logAndEmit('🗑️ Vaciando la cola de tareas pendientes...', 'log-warn'); const tasksToCancel = taskQueue.length; taskQueue = []; try { await pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado = 'pending'"); logAndEmit(`✅ Cola vaciada. ${tasksToCancel} tareas canceladas.`, 'log-success'); io.emit('queue-update', taskQueue.length); res.status(200).json({ message: 'Cola limpiada.' }); } catch (dbError) { logAndEmit(`❌ Error al cancelar tareas: ${dbError.message}`, 'log-error'); res.status(500).json({ message: 'Error en DB.' }); } });
@@ -436,21 +450,21 @@ async function executeUnifiedSendSequence(task, workerIndex) {
             await executeActivationSequence(recipientNumber, workerIndex);
             return;
         }
-        
+
         logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS });
         await delay(delaySettings.delay1);
-        
+
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
         await delay(delaySettings.delay2);
-        
+
         const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`;
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         await delay(2000);
-        
+
         logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
         await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
-        
+
         releaseWorkerAndContinue(workerIndex);
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
@@ -469,16 +483,16 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
         logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template (pago)...`, 'log-info');
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
         await delay(delaySettings.delay1);
-        
+
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
         await delay(delaySettings.delay2);
-        
+
         await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
         await delay(5000);
-        
+
         await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW()) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`, [recipientNumber]);
         logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success');
-        
+
         const state = await getConversationWindowState(recipientNumber);
         io.emit('window-status-update', state);
     } catch (error) {
