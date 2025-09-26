@@ -6,8 +6,8 @@ const { Server } = require("socket.io");
 const axios = require('axios');
 const path = require('path');
 const multer = require('multer');
-const fsSync = require('fs'); // Para operaciones síncronas
-const fs = require('fs').promises; // Para operaciones asíncronas
+const fsSync = require('fs');
+const fs = require('fs').promises;
 const { Pool } = require('pg');
 const AdmZip = require('adm-zip');
 const sharp = require('sharp');
@@ -24,19 +24,9 @@ const ACTIVATION_IMAGE_NAME = 'activation_image.jpeg';
 const CONCURRENT_IMAGE_PROCESSING_LIMIT = 4;
 
 // --- VALIDACIONES DE INICIO ---
-if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) {
-    console.error("❌ Error Crítico: Faltan las credenciales ADMIN_USER o ADMIN_PASSWORD en el archivo .env.");
-    process.exit(1);
-}
-if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) {
-    console.error("❌ Error Crítico: La configuración de remitentes en .env es inválida.");
-    process.exit(1);
-}
-const requireAuth = basicAuth({
-    users: { [process.env.ADMIN_USER]: process.env.ADMIN_PASSWORD },
-    challenge: true,
-    unauthorizedResponse: 'Acceso no autorizado. Se requieren credenciales válidas.'
-});
+if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) { console.error("❌ Error Crítico: Faltan credenciales de administrador."); process.exit(1); }
+if (PHONE_NUMBER_IDS.length === 0 || PHONE_NUMBER_IDS.length !== WHATSAPP_TOKENS.length) { console.error("❌ Error Crítico: Configuración de remitentes inválida."); process.exit(1); }
+const requireAuth = basicAuth({ users: { [process.env.ADMIN_USER]: process.env.ADMIN_PASSWORD }, challenge: true, unauthorizedResponse: 'Acceso no autorizado.' });
 
 // --- INICIALIZACIÓN DE COMPONENTES ---
 const senderPool = PHONE_NUMBER_IDS.map((id, index) => ({ id: id.trim(), token: WHATSAPP_TOKENS[index].trim() }));
@@ -56,14 +46,7 @@ const ZIPS_DIR = path.join(__dirname, 'zips');
 const TEMP_DIR = path.join(__dirname, 'temp');
 const ASSETS_DIR = path.join(__dirname, 'assets');
 
-async function createDirectories() {
-    const dirs = [UPLOADS_DIR, PENDING_DIR, ARCHIVED_DIR, CONFIRMED_ARCHIVE_DIR, NOT_CONFIRMED_ARCHIVE_DIR, ZIPS_DIR, TEMP_DIR, ASSETS_DIR];
-    for (const dir of dirs) {
-        try { await fs.mkdir(dir, { recursive: true }); } catch (error) { console.error(`❌ Error creando el directorio ${dir}:`, error); process.exit(1); }
-    }
-    console.log('✅ Todos los directorios están listos.');
-}
-
+async function createDirectories() { const dirs = [UPLOADS_DIR, PENDING_DIR, ARCHIVED_DIR, CONFIRMED_ARCHIVE_DIR, NOT_CONFIRMED_ARCHIVE_DIR, ZIPS_DIR, TEMP_DIR, ASSETS_DIR]; for (const dir of dirs) { try { await fs.mkdir(dir, { recursive: true }); } catch (error) { console.error(`❌ Error creando directorio ${dir}:`, error); process.exit(1); } } console.log('✅ Todos los directorios están listos.'); }
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 50 * 1024 * 1024 } });
 const activationImagePath = path.join(ASSETS_DIR, ACTIVATION_IMAGE_NAME);
 
@@ -74,106 +57,53 @@ let isConversationCheckPaused = false;
 let isQueueProcessingPaused = false;
 let delaySettings = { delay1: 10000, delay2: 2000, taskSeparation: 500 };
 
-// <<< NUEVO: Lógica del "Guardián" del Webhook >>>
+// <<< NUEVO: Estado de Alerta Persistente >>>
+let botFailureInfo = {
+    hasFailed: false,
+    message: ''
+};
 let webhookWatchdog = null;
-const WATCHDOG_TIMEOUT = 30000; // 30 segundos
+const WATCHDOG_TIMEOUT = 30000;
 
 // --- FUNCIONES UTILITARIAS ---
-function logAndEmit(text, type = 'log-info') {
-    console.log(text);
-    io.emit('status-update', { text, type });
-}
-
-function getFormattedTimestamp() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}_${hours}-${minutes}`;
-}
-
+function logAndEmit(text, type = 'log-info') { console.log(text); io.emit('status-update', { text, type }); }
+function getFormattedTimestamp() { const now = new Date(); const year = now.getFullYear(); const month = String(now.getMonth() + 1).padStart(2, '0'); const day = String(now.getDate()).padStart(2, '0'); const hours = String(now.getHours()).padStart(2, '0'); const minutes = String(now.getMinutes()).padStart(2, '0'); return `${year}-${month}-${day}_${hours}-${minutes}`; }
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// <<< NUEVO: Funciones para manejar el Guardián >>>
+// <<< GUARDIÁN DEL WEBHOOK ACTUALIZADO >>>
 function startWebhookWatchdog() {
-    if (webhookWatchdog) return; // Ya está activo
+    if (webhookWatchdog || botFailureInfo.hasFailed) return; // No iniciar si ya está activo o si el sistema ya falló
     logAndEmit('🐶 Guardián del webhook activado. Esperando respuestas...', 'log-info');
     webhookWatchdog = setTimeout(async () => {
         isQueueProcessingPaused = true;
-        io.emit('queue-status-update', { isPaused: true });
         
-        const errorMessage = `🚨 ¡FALLO CRÍTICO! No se han recibido respuestas del bot en ${WATCHDOG_TIMEOUT / 1000} segundos mientras la cola estaba activa. Se asume que el bot receptor ha fallado. La cola ha sido pausada y limpiada para prevenir envíos duplicados. Por favor, revise el bot receptor y vuelva a subir el ZIP cuando esté solucionado.`;
-        logAndEmit(errorMessage, 'log-error');
-        io.emit('bot-failure', { message: errorMessage });
+        botFailureInfo = {
+            hasFailed: true,
+            message: `🚨 ¡FALLO CRÍTICO! No se han recibido respuestas del bot en ${WATCHDOG_TIMEOUT / 1000} segundos. Se asume que el bot receptor ha fallado. La cola ha sido pausada y limpiada. Revise el bot receptor y resetee el estado desde el panel.`
+        };
 
-        // Limpiar la cola para evitar duplicados
+        io.emit('queue-status-update', { isPaused: true });
+        logAndEmit(botFailureInfo.message, 'log-error');
+        io.emit('bot-failure', botFailureInfo); // Notifica a todos los clientes
+
         taskQueue = [];
         io.emit('queue-update', 0);
         try {
             await pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado IN ('pending', 'procesando')");
-            logAndEmit('🗑️ Cola de tareas pendientes limpiada automáticamente por seguridad.', 'log-warn');
+            logAndEmit('🗑️ Cola de tareas pendientes limpiada por seguridad.', 'log-warn');
         } catch (dbError) {
             logAndEmit(`❌ Error al limpiar la cola automáticamente: ${dbError.message}`, 'log-error');
         }
     }, WATCHDOG_TIMEOUT);
 }
 
-function stopWebhookWatchdog() {
-    if (webhookWatchdog) {
-        clearTimeout(webhookWatchdog);
-        webhookWatchdog = null;
-        logAndEmit('🐶 Guardián del webhook desactivado. La cola está vacía.', 'log-info');
-    }
-}
+function stopWebhookWatchdog() { if (webhookWatchdog) { clearTimeout(webhookWatchdog); webhookWatchdog = null; logAndEmit('🐶 Guardián del webhook desactivado.', 'log-info'); } }
+function resetWebhookWatchdog() { if (webhookWatchdog) { clearTimeout(webhookWatchdog); webhookWatchdog = null; startWebhookWatchdog(); } }
 
-function resetWebhookWatchdog() {
-    if (webhookWatchdog) {
-        clearTimeout(webhookWatchdog);
-        webhookWatchdog = null; // Lo paramos
-        startWebhookWatchdog(); // y lo reiniciamos, renovando el timer
-    }
-}
-
-
-// --- LÓGICA DE GESTIÓN DE VENTANA ---
-async function getConversationWindowState(recipientNumber) {
-    const windowResult = await pool.query('SELECT last_activation_time FROM conversation_windows WHERE recipient_number = $1', [recipientNumber]);
-    if (windowResult.rowCount === 0) return { status: 'INACTIVE', details: 'Nunca activada' };
-    const lastActivation = new Date(windowResult.rows[0].last_activation_time).getTime();
-    const minutesSinceActivation = (Date.now() - lastActivation) / (1000 * 60);
-    const minutesLeft = 24 * 60 - minutesSinceActivation;
-    if (minutesSinceActivation < 10) return { status: 'COOL_DOWN', details: `Enfriamiento por ${Math.round(10 - minutesSinceActivation)} min más` };
-    if (minutesLeft <= 0) return { status: 'INACTIVE', details: 'Expirada' };
-    if (minutesLeft < 20) return { status: 'EXPIRING_SOON', details: `Expira en ${Math.round(minutesLeft)} min` };
-    return { status: 'ACTIVE', details: `Activa por ${Math.floor(minutesLeft / 60)}h ${Math.round(minutesLeft % 60)}m más` };
-}
-
-// --- GESTIÓN DE BASE DE DATOS ---
-async function initializeDatabase() {
-    const client = await pool.connect();
-    try {
-        await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50) DEFAULT 'pending', creado_en TIMESTAMPTZ DEFAULT NOW());`);
-        await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, confirmado_en TIMESTAMPTZ DEFAULT NOW());`);
-        await client.query(`CREATE TABLE IF NOT EXISTS no_confirmados (id SERIAL PRIMARY KEY, numero_no_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, registrado_en TIMESTAMPTZ DEFAULT NOW());`);
-        await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`);
-        console.log("✅ Todas las tablas verificadas y/o creadas.");
-    } catch (err) { console.error("❌ Error al inicializar la base de datos:", err); throw err; }
-    finally { client.release(); }
-}
-
-async function loadPendingTasks() {
-    try {
-        logAndEmit('🔄 Cargando tareas pendientes desde la base de datos...', 'log-info');
-        const res = await pool.query("SELECT id, numero_destino, nombre_imagen FROM envios WHERE estado IN ('pending', 'procesando') ORDER BY id ASC");
-        if (res.rowCount > 0) {
-            taskQueue = res.rows.map(row => ({ id: row.id, recipientNumber: row.numero_destino, imageName: row.nombre_imagen }));
-            logAndEmit(`✅ ${taskQueue.length} tarea(s) pendiente(s) cargada(s) en la cola.`, 'log-success');
-        } else { logAndEmit('👍 No se encontraron tareas pendientes.', 'log-info'); }
-        io.emit('queue-update', taskQueue.length);
-    } catch (error) { logAndEmit(`❌ Error fatal al cargar tareas pendientes: ${error.message}`, 'log-error'); process.exit(1); }
-}
+// --- LÓGICA DE GESTIÓN DE VENTANA Y DB (Sin cambios) ---
+async function getConversationWindowState(recipientNumber) { const windowResult = await pool.query('SELECT last_activation_time FROM conversation_windows WHERE recipient_number = $1', [recipientNumber]); if (windowResult.rowCount === 0) return { status: 'INACTIVE', details: 'Nunca activada' }; const lastActivation = new Date(windowResult.rows[0].last_activation_time).getTime(); const minutesSinceActivation = (Date.now() - lastActivation) / (1000 * 60); const minutesLeft = 24 * 60 - minutesSinceActivation; if (minutesSinceActivation < 10) return { status: 'COOL_DOWN', details: `Enfriamiento por ${Math.round(10 - minutesSinceActivation)} min más` }; if (minutesLeft <= 0) return { status: 'INACTIVE', details: 'Expirada' }; if (minutesLeft < 20) return { status: 'EXPIRING_SOON', details: `Expira en ${Math.round(minutesLeft)} min` }; return { status: 'ACTIVE', details: `Activa por ${Math.floor(minutesLeft / 60)}h ${Math.round(minutesLeft % 60)}m más` }; }
+async function initializeDatabase() { const client = await pool.connect(); try { await client.query(`CREATE TABLE IF NOT EXISTS envios (id SERIAL PRIMARY KEY, numero_destino VARCHAR(255) NOT NULL, nombre_imagen VARCHAR(255), remitente_usado VARCHAR(255), estado VARCHAR(50) DEFAULT 'pending', creado_en TIMESTAMPTZ DEFAULT NOW());`); await client.query(`CREATE TABLE IF NOT EXISTS confirmados (id SERIAL PRIMARY KEY, numero_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, confirmado_en TIMESTAMPTZ DEFAULT NOW());`); await client.query(`CREATE TABLE IF NOT EXISTS no_confirmados (id SERIAL PRIMARY KEY, numero_no_confirmado VARCHAR(255) NOT NULL, cedula VARCHAR(50) UNIQUE NOT NULL, fecha_nacimiento DATE, registrado_en TIMESTAMPTZ DEFAULT NOW());`); await client.query(`CREATE TABLE IF NOT EXISTS conversation_windows (id SERIAL PRIMARY KEY, recipient_number VARCHAR(255) NOT NULL UNIQUE, last_activation_time TIMESTAMPTZ NOT NULL);`); console.log("✅ Todas las tablas verificadas y/o creadas."); } catch (err) { console.error("❌ Error al inicializar la base de datos:", err); throw err; } finally { client.release(); } }
+async function loadPendingTasks() { try { logAndEmit('🔄 Cargando tareas pendientes...', 'log-info'); const res = await pool.query("SELECT id, numero_destino, nombre_imagen FROM envios WHERE estado IN ('pending', 'procesando') ORDER BY id ASC"); if (res.rowCount > 0) { taskQueue = res.rows.map(row => ({ id: row.id, recipientNumber: row.numero_destino, imageName: row.nombre_imagen })); logAndEmit(`✅ ${taskQueue.length} tareas cargadas.`, 'log-success'); } else { logAndEmit('👍 No se encontraron tareas pendientes.', 'log-info'); } io.emit('queue-update', taskQueue.length); } catch (error) { logAndEmit(`❌ Error fatal al cargar tareas: ${error.message}`, 'log-error'); process.exit(1); } }
 
 // --- LÓGICA DE SOCKET.IO ---
 io.on('connection', (socket) => {
@@ -182,6 +112,11 @@ io.on('connection', (socket) => {
     socket.emit('initial-delay-settings', delaySettings);
     socket.emit('queue-status-update', { isPaused: isQueueProcessingPaused });
 
+    // <<< NUEVO: Si el sistema está en estado de fallo, notificar al nuevo cliente >>>
+    if (botFailureInfo.hasFailed) {
+        socket.emit('bot-failure', botFailureInfo);
+    }
+    
     socket.on('request-window-status', async ({ number }) => { try { const state = await getConversationWindowState(number); let logType = 'log-info'; if (state.status === 'ACTIVE' || state.status === 'COOL_DOWN') logType = 'log-success'; if (state.status === 'INACTIVE' || state.status === 'EXPIRING_SOON') logType = 'log-warn'; socket.emit('status-update', { text: `[Consulta] Estado para ${number}: <strong>${state.status}</strong> (${state.details})`, type: logType }); } catch (error) { logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error'); } });
     socket.on('ver-confirmados', async () => { try { const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en DESC"); socket.emit('datos-confirmados', result.rows); } catch (dbError) { console.error("Error al obtener confirmados:", dbError); } });
     socket.on('ver-no-confirmados', async () => { try { const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_no_confirmado, registrado_en FROM no_confirmados ORDER BY registrado_en DESC"); socket.emit('datos-no-confirmados', result.rows); } catch (dbError) { console.error("Error al obtener no confirmados:", dbError); } });
@@ -200,17 +135,16 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message || message.type !== 'text') return;
-
+    
+    // <<< Reseteamos el guardián porque recibimos una respuesta válida >>>
+    resetWebhookWatchdog();
+    
     const from = message.from;
     const textBody = message.text.body;
     const regex = /cedula:\s*(\d+)\s*fecha de nacimiento:\s*(\d{2}\/\d{2}\/\d{4})\s*ud (no )?esta habilitado/i;
     const match = textBody.match(regex);
-
     if (!match) return;
-
-    // <<< Reseteamos el guardián porque recibimos una respuesta válida
-    resetWebhookWatchdog();
-
+    
     const [, cedula, fechaNacStr, notKeyword] = match;
     const isConfirmed = !notKeyword;
     const status = isConfirmed ? 'Confirmado' : 'No Confirmado';
@@ -218,12 +152,11 @@ app.post('/webhook', async (req, res) => {
     const fechaNac = `${year}-${month}-${day}`;
     const tableName = isConfirmed ? 'confirmados' : 'no_confirmados';
     const numberColumn = isConfirmed ? 'numero_confirmado' : 'numero_no_confirmado';
-
     try {
         const pendingFiles = await fs.readdir(PENDING_DIR);
         const imageToMove = pendingFiles.find(file => file.includes(cedula));
         if (!imageToMove) {
-            logAndEmit(`[Webhook] ❌ ERROR CRÍTICO: Respuesta para CI ${cedula} recibida, pero no se encontró su imagen en 'pending'. No se registrará.`, 'log-error');
+            logAndEmit(`[Webhook] ❌ ERROR CRÍTICO: Respuesta para CI ${cedula} recibida, pero no se encontró su imagen. No se registrará.`, 'log-error');
             return;
         }
         const oldPath = path.join(PENDING_DIR, imageToMove);
@@ -240,7 +173,10 @@ app.post('/webhook', async (req, res) => {
 });
 
 // --- ENDPOINTS DE ADMINISTRACIÓN (PROTEGIDOS) ---
-app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) => {
+app.post('/subir-zip', requireAuth, async (req, res) => {
+    if (botFailureInfo.hasFailed) {
+        return res.status(503).json({ message: 'El sistema está en estado de fallo. Por favor, resetee el estado desde el panel antes de subir nuevos archivos.' });
+    }
     const { destinationNumber } = req.body;
     const zipFile = req.file;
     if (!destinationNumber || !zipFile) return res.status(400).json({ message: "Faltan datos." });
@@ -280,12 +216,26 @@ app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) =
     } catch (error) { logAndEmit(`❌ Error al procesar ZIP: ${error.message}`, 'log-error'); res.status(500).json({ message: "Error interno al procesar ZIP." }); }
 });
 
+// <<< NUEVO ENDPOINT PARA RESETEAR EL ESTADO DE FALLO >>>
+app.post('/reset-bot-failure', requireAuth, (req, res) => {
+    if (botFailureInfo.hasFailed) {
+        botFailureInfo = { hasFailed: false, message: '' };
+        isQueueProcessingPaused = false; // Reanudamos la cola
+        stopWebhookWatchdog();
+        logAndEmit('🔧 El estado de fallo del bot ha sido reseteado por el administrador. El sistema está operativo.', 'log-warn');
+        io.emit('bot-failure-resolved');
+        io.emit('queue-status-update', { isPaused: false });
+        processQueue();
+    }
+    res.status(200).json({ message: 'Estado de fallo reseteado.' });
+});
+
 app.get('/download-confirmed-excel', requireAuth, async (req, res) => { try { const result = await pool.query('SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en ASC'); const workbook = new exceljs.Workbook(); const worksheet = workbook.addWorksheet('Confirmados'); worksheet.columns = [{ header: 'Cédula', key: 'cedula', width: 15 }, { header: 'Fecha de Nacimiento', key: 'fecha_nacimiento', width: 20 }, { header: 'Número de Contacto', key: 'numero_confirmado', width: 20 }, { header: 'Fecha de Confirmación', key: 'confirmado_en', width: 25 }]; worksheet.addRows(result.rows); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); const timestamp = getFormattedTimestamp(); const fileName = `confirmaciones_bps (${timestamp}).xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`); await workbook.xlsx.write(res); res.end(); } catch (error) { logAndEmit(`❌ Error generando Excel: ${error.message}`, 'log-error'); res.status(500).send("Error al generar el archivo Excel."); } });
 async function createAndSendZip(res, directory, zipName) { try { const files = await fs.readdir(directory); if (files.length === 0) return res.status(404).json({ message: `No hay imágenes en la categoría '${zipName}'.` }); const zip = new AdmZip(); for (const file of files) { zip.addLocalFile(path.join(directory, file)); } const zipBuffer = zip.toBuffer(); const timestamp = getFormattedTimestamp(); const finalZipName = `${zipName}_(${timestamp}).zip`; await fs.writeFile(path.join(ZIPS_DIR, finalZipName), zipBuffer); res.setHeader('Content-Type', 'application/zip'); res.setHeader('Content-Disposition', `attachment; filename="${finalZipName}"`); res.send(zipBuffer); } catch (error) { logAndEmit(`❌ Error generando ZIP de ${zipName}: ${error.message}`, 'log-error'); res.status(500).send(`Error al generar el ZIP de ${zipName}.`); } }
 app.get('/download-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, CONFIRMED_ARCHIVE_DIR, 'confirmados'); });
 app.get('/download-not-confirmed-zip', requireAuth, (req, res) => { createAndSendZip(res, NOT_CONFIRMED_ARCHIVE_DIR, 'no-confirmados'); });
 app.post('/pause-queue', requireAuth, (req, res) => { if (!isQueueProcessingPaused) { isQueueProcessingPaused = true; logAndEmit('⏸️ Cola pausada.', 'log-warn'); io.emit('queue-status-update', { isPaused: true }); } res.status(200).json({ message: 'Cola pausada.' }); });
-app.post('/resume-queue', requireAuth, (req, res) => { if (isQueueProcessingPaused) { isQueueProcessingPaused = false; logAndEmit('▶️ Cola reanudada.', 'log-info'); io.emit('queue-status-update', { isPaused: false }); processQueue(); } res.status(200).json({ message: 'Cola reanudada.' }); });
+app.post('/resume-queue', requireAuth, (req, res) => { if (botFailureInfo.hasFailed) { return res.status(403).json({ message: 'No se puede reanudar. El sistema está en estado de fallo.' }); } if (isQueueProcessingPaused) { isQueueProcessingPaused = false; logAndEmit('▶️ Cola reanudada.', 'log-info'); io.emit('queue-status-update', { isPaused: false }); processQueue(); } res.status(200).json({ message: 'Cola reanudada.' }); });
 app.post('/clear-queue', requireAuth, async (req, res) => { logAndEmit('🗑️ Vaciando la cola de tareas pendientes...', 'log-warn'); const tasksToCancel = taskQueue.length; taskQueue = []; try { await pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado = 'pending'"); logAndEmit(`✅ Cola vaciada. ${tasksToCancel} tareas canceladas.`, 'log-success'); io.emit('queue-update', taskQueue.length); res.status(200).json({ message: 'Cola limpiada.' }); } catch (dbError) { logAndEmit(`❌ Error al cancelar tareas: ${dbError.message}`, 'log-error'); res.status(500).json({ message: 'Error en DB.' }); } });
 app.post('/manual-activate', requireAuth, upload.none(), async (req, res) => { const { destinationNumber } = req.body; if (!destinationNumber) return res.status(400).json({ message: "Falta el número." }); if (availableWorkers.size === 0) return res.status(503).json({ message: "Workers ocupados." }); const workerIndex = availableWorkers.values().next().value; availableWorkers.delete(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); logAndEmit(`▶️ [Worker ${workerIndex}] iniciando activación MANUAL para ${destinationNumber}.`, 'log-info'); executeActivationSequence(destinationNumber, workerIndex); res.status(202).json({ message: "Activación iniciada." }); });
 app.post('/debug-update-window', requireAuth, async (req, res) => { const { recipientNumber, newTimestamp } = req.body; if (!recipientNumber || !newTimestamp) return res.status(400).json({ message: "Faltan datos." }); try { await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, $2) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = $2`, [recipientNumber, newTimestamp]); const state = await getConversationWindowState(recipientNumber); io.emit('window-status-update', state); res.json({ message: `Fecha forzada para ${recipientNumber}.` }); } catch (error) { console.error("Error en /debug-update-window:", error); res.status(500).json({ message: "Error al actualizar." }); } });
@@ -294,40 +244,12 @@ app.post('/update-delays', requireAuth, (req, res) => { const { delay1, delay2, 
 // --- LÓGICA DE PROCESAMIENTO DE TAREAS ---
 function releaseWorkerAndContinue(workerIndex) { availableWorkers.add(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); setTimeout(processQueue, delaySettings.taskSeparation); }
 async function processQueue() {
-    // <<< Si no hay tareas, el guardián se detiene
-    if (taskQueue.length === 0) {
-        stopWebhookWatchdog();
-    }
-    
-    if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) {
-        if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber));
-        return;
-    }
-    const nextRecipient = taskQueue[0].recipientNumber;
-    const windowState = await getConversationWindowState(nextRecipient);
-    io.emit('window-status-update', windowState);
-    if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') {
-        if (!isConversationCheckPaused) { logAndEmit(`⏸️ Cola en espera para ${nextRecipient}: ${windowState.details}`, 'log-warn'); isConversationCheckPaused = true; }
-        setTimeout(() => { isConversationCheckPaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 30000);
-        return;
-    }
-    isConversationCheckPaused = false;
-    
-    // <<< Si hay tareas y no estamos pausados, nos aseguramos de que el guardián esté activo
+    if (taskQueue.length === 0) { stopWebhookWatchdog(); }
+    if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) { if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber)); return; }
     startWebhookWatchdog();
-
-    while (availableWorkers.size > 0 && taskQueue.length > 0 && !isQueueProcessingPaused) {
-        const workerIndex = availableWorkers.values().next().value;
-        availableWorkers.delete(workerIndex);
-        io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
-        const task = taskQueue.shift();
-        io.emit('queue-update', taskQueue.length);
-        try {
-            await pool.query('UPDATE envios SET estado = $1, remitente_usado = $2 WHERE id = $3', ['procesando', senderPool[workerIndex].id, task.id]);
-            logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id}`, 'log-info');
-            executeUnifiedSendSequence(task, workerIndex);
-        } catch (dbError) { logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); releaseWorkerAndContinue(workerIndex); }
-    }
+    const nextRecipient = taskQueue[0].recipientNumber; const windowState = await getConversationWindowState(nextRecipient); io.emit('window-status-update', windowState);
+    if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') { if (!isConversationCheckPaused) { logAndEmit(`⏸️ Cola en espera para ${nextRecipient}: ${windowState.details}`, 'log-warn'); isConversationCheckPaused = true; } setTimeout(() => { isConversationCheckPaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 30000); return; } isConversationCheckPaused = false;
+    while (availableWorkers.size > 0 && taskQueue.length > 0 && !isQueueProcessingPaused) { const workerIndex = availableWorkers.values().next().value; availableWorkers.delete(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); const task = taskQueue.shift(); io.emit('queue-update', taskQueue.length); try { await pool.query('UPDATE envios SET estado = $1, remitente_usado = $2 WHERE id = $3', ['procesando', senderPool[workerIndex].id, task.id]); logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id}`, 'log-info'); executeUnifiedSendSequence(task, workerIndex); } catch (dbError) { logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); releaseWorkerAndContinue(workerIndex); } }
 }
 async function executeUnifiedSendSequence(task, workerIndex) { const { id, recipientNumber, imageName } = task; const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; try { const windowState = await getConversationWindowState(recipientNumber); if (windowState.status === 'INACTIVE') { logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para #${id}. Activando...`, 'log-warn'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]); await executeActivationSequence(recipientNumber, workerIndex); return; } logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`; await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(2000); logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success'); await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]); releaseWorkerAndContinue(workerIndex); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló secuencia para #${id}: ${errorMessage}`, 'log-error'); await pool.query("UPDATE envios SET estado = 'failed' WHERE id = $1", [id]); releaseWorkerAndContinue(workerIndex); } }
 async function executeActivationSequence(recipientNumber, workerIndex) { const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; const publicImageUrl = `${RENDER_EXTERNAL_URL}/assets/${ACTIVATION_IMAGE_NAME}`; try { logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template (pago)...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(5000); await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW()) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`, [recipientNumber]); logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success'); const state = await getConversationWindowState(recipientNumber); io.emit('window-status-update', state); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló activación: ${errorMessage}`, 'log-error'); } finally { releaseWorkerAndContinue(workerIndex); } }
@@ -337,42 +259,22 @@ async function cleanupOldFiles(directory, maxAge) { try { const files = await fs
 async function startServer() {
     try {
         await createDirectories();
-        if (!fsSync.existsSync(activationImagePath)) {
-            console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no está en /assets.`);
-            process.exit(1);
-        }
+        if (!fsSync.existsSync(activationImagePath)) { console.error(`🔥🔥🔥 ERROR FATAL: El archivo '${ACTIVATION_IMAGE_NAME}' no está en /assets.`); process.exit(1); }
         await initializeDatabase();
         await loadPendingTasks();
-
         server.listen(PORT, () => {
             console.log(`🚀 Servidor iniciado en puerto ${PORT}.`);
             const unaSemanaEnMs = 7 * 24 * 60 * 60 * 1000;
-
-            // <<< NUEVA LÓGICA DE LIMPIEZA RETARDADA >>>
-            console.log(`🧹 Primera limpieza programada para dentro de 7 días.`);
+            console.log(`🧹 Primera limpieza de archivos programada para dentro de 7 días.`);
             setTimeout(() => {
-                console.log('⏰ Ejecutando la primera limpieza programada de archivos antiguos...');
+                console.log('⏰ Ejecutando la primera limpieza programada de archivos...');
                 cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs);
                 cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs);
-                
-                // Ahora que la primera limpieza se ejecutó, programamos las siguientes cada 24h
-                setInterval(() => {
-                    console.log('🧹 Ejecutando limpieza periódica...');
-                    cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs);
-                    cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs);
-                }, 24 * 60 * 60 * 1000);
+                setInterval(() => { console.log('🧹 Ejecutando limpieza periódica...'); cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs); cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs); }, 24 * 60 * 60 * 1000);
             }, unaSemanaEnMs);
-
-
-            if (taskQueue.length > 0) {
-                logAndEmit('▶️ Iniciando procesamiento de la cola.', 'log-info');
-                processQueue();
-            }
+            if (taskQueue.length > 0) { logAndEmit('▶️ Iniciando procesamiento de la cola.', 'log-info'); processQueue(); }
         });
-    } catch (error) {
-        console.error("🔥🔥🔥 FALLO CRÍTICO AL INICIAR SERVIDOR 🔥🔥🔥", error);
-        process.exit(1);
-    }
+    } catch (error) { console.error("🔥🔥🔥 FALLO CRÍTICO AL INICIAR SERVIDOR 🔥🔥🔥", error); process.exit(1); }
 }
 
 startServer();

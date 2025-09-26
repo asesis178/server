@@ -5,478 +5,83 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard | Bot Autónomo</title>
-    <!-- Iconos Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --color-bg: #f8f9fa;
-            --color-surface: #ffffff;
-            --color-primary: #007bff;
-            --color-primary-hover: #0069d9;
-            --color-danger: #dc3545;
-            --color-danger-hover: #c82333;
-            --color-success: #28a745;
-            --color-warn: #ffc107;
-            --color-info: #17a2b8;
-            --color-inactive: #6c757d;
-            --color-text: #212529;
-            --color-text-secondary: #6c757d;
-            --color-border: #dee2e6;
-            --color-input-bg: #f1f3f5;
-            --shadow-color: rgba(0, 0, 0, 0.1);
+            --color-bg: #f8f9fa; --color-surface: #ffffff; --color-primary: #007bff; --color-primary-hover: #0069d9;
+            --color-danger: #dc3545; --color-danger-hover: #c82333; --color-success: #28a745; --color-warn: #ffc107;
+            --color-info: #17a2b8; --color-inactive: #6c757d; --color-text: #212529; --color-text-secondary: #6c757d;
+            --color-border: #dee2e6; --color-input-bg: #f1f3f5; --shadow-color: rgba(0, 0, 0, 0.1);
         }
-
         [data-theme="dark"] {
-            --color-bg: #121212;
-            --color-surface: #1e1e1e;
-            --color-primary: #3793ff;
-            --color-primary-hover: #5fa5ff;
-            --color-danger: #e5484d;
-            --color-danger-hover: #ff5c61;
-            --color-text: #e9ecef;
-            --color-text-secondary: #adb5bd;
-            --color-border: #343a40;
-            --color-input-bg: #2c2c2e;
-            --shadow-color: rgba(0, 0, 0, 0.4);
-        }
-
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: var(--color-bg);
-            color: var(--color-text);
-            margin: 0;
-            padding: 2rem;
-            line-height: 1.6;
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        #theme-switcher {
-            position: fixed;
-            top: 2rem;
-            right: 2rem;
-            width: 45px;
-            height: 45px;
-            background-color: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: 50%;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 8px var(--shadow-color);
-            transition: all 0.3s ease;
-            overflow: hidden;
-            z-index: 1000;
-        }
-
-        #theme-switcher:hover {
-            transform: translateY(-2px) scale(1.05);
-            box-shadow: 0 4px 12px var(--shadow-color);
-        }
-
-        #theme-switcher .icon {
-            font-size: 1.2rem;
-            position: absolute;
-            transition: transform 0.4s ease, opacity 0.4s ease;
-        }
-
-        #theme-switcher .sun {
-            color: #f5a623;
-        }
-
-        #theme-switcher .moon {
-            color: #50b1f5;
-        }
-
-        [data-theme="light"] .moon {
-            transform: translateY(100%) rotate(90deg);
-            opacity: 0;
-        }
-
-        [data-theme="light"] .sun {
-            transform: translateY(0) rotate(0);
-            opacity: 1;
-        }
-
-        [data-theme="dark"] .sun {
-            transform: translateY(-100%) rotate(-90deg);
-            opacity: 0;
-        }
-
-        [data-theme="dark"] .moon {
-            transform: translateY(0) rotate(0);
-            opacity: 1;
-        }
-
-        .main-container {
-            max-width: 900px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-        }
-
-        .header {
-            margin-bottom: 1rem;
-            animation: fadeInUp 0.5s ease-out forwards;
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin: 0;
-        }
-
-        .header p {
-            font-size: 1.1rem;
-            color: var(--color-text-secondary);
-            margin-top: 5px;
-        }
-
-        .card {
-            background-color: var(--color-surface);
-            border-radius: 12px;
-            border: 1px solid var(--color-border);
-            box-shadow: 0 4px 12px var(--shadow-color);
-            padding: 25px 30px;
-            box-sizing: border-box;
-            transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease, border-color 0.3s ease;
-            animation: fadeInUp 0.6s ease-out forwards;
-            animation-delay: calc(var(--card-index) * 0.1s);
-            opacity: 0;
-        }
-
-        .card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px var(--shadow-color);
-        }
-
-        h2 {
-            font-size: 1.5rem;
-            margin-top: 0;
-            padding-bottom: 15px;
-            margin-bottom: 25px;
-            border-bottom: 1px solid var(--color-border);
-            font-weight: 600;
-            transition: border-color 0.3s ease;
-        }
-
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-        }
-
-        .status-box {
-            background-color: var(--color-bg);
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid var(--color-border);
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-
-        .status-box .label {
-            font-size: 0.9rem;
-            color: var(--color-text-secondary);
-            margin-bottom: 10px;
-            font-weight: 500;
-        }
-
-        .status-box .value {
-            font-size: 2.2rem;
-            font-weight: 700;
-            line-height: 1.2;
-        }
-
-        .status-box .details {
-            font-size: 0.8rem;
-            color: var(--color-text-secondary);
-            margin-top: 8px;
-            height: 1.2em;
-        }
-
-        .status-indicator {
-            padding: 5px 15px;
-            border-radius: 50px;
-            color: white;
-            font-size: 0.9rem;
-            font-weight: 600;
-            text-transform: capitalize;
-            display: inline-block;
-        }
-
-        .status-indicator.active,
-        .status-indicator.running {
-            background-color: var(--color-success);
-        }
-
-        .status-indicator.paused {
-            background-color: var(--color-warn);
-            color: #1e1e1e;
-        }
-
-        .status-indicator.cool_down {
-            background-color: var(--color-info);
-        }
-
-        .status-indicator.expiring_soon {
-            background-color: var(--color-warn);
-            color: #1e1e1e;
-        }
-
-        .status-indicator.inactive {
-            background-color: var(--color-inactive);
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: var(--color-text-secondary);
-            font-size: 0.9rem;
-        }
-
-        input[type="text"],
-        input[type="file"],
-        input[type="datetime-local"],
-        input[type="number"] {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid var(--color-border);
-            border-radius: 6px;
-            font-size: 1rem;
-            box-sizing: border-box;
-            background-color: var(--color-input-bg);
-            color: var(--color-text);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease, color 0.3s ease;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: var(--color-primary);
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 25%, transparent);
-        }
-
-        input[type="file"] {
-            background-color: var(--color-surface);
-        }
-
-        input::placeholder {
-            color: var(--color-text-secondary);
-            opacity: 0.7;
-        }
-
-        .btn {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        form>.btn {
-            margin-top: 10px;
-        }
-
-        .btn:disabled {
-            background-color: var(--color-inactive);
-            cursor: not-allowed;
-            color: #fff;
-            opacity: 0.7;
-        }
-
-        .btn .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255, 255, 255, 0.5);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .btn-primary {
-            background-color: var(--color-primary);
-            color: white;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            background-color: var(--color-primary-hover);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 10px color-mix(in srgb, var(--color-primary) 30%, transparent);
-        }
-
-        .btn-danger {
-            background-color: var(--color-danger);
-            color: white;
-        }
-
-        .btn-danger:hover:not(:disabled) {
-            background-color: var(--color-danger-hover);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 10px color-mix(in srgb, var(--color-danger) 30%, transparent);
-        }
-
-        .btn-secondary {
-            background-color: var(--color-input-bg);
-            color: var(--color-text);
-            border: 1px solid var(--color-border);
-        }
-
-        .btn-secondary:hover:not(:disabled) {
-            background-color: var(--color-border);
-        }
-
-        .button-group {
-            display: flex;
-            gap: 10px;
-        }
-
-        #log-container {
-            background-color: #1e2124;
-            color: #e9ecef;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-            font-size: 0.9rem;
-            height: 400px;
-            overflow-y: auto;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #444;
-        }
-
-        #log-container::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        #log-container::-webkit-scrollbar-track {
-            background: #2a2d30;
-        }
-
-        #log-container::-webkit-scrollbar-thumb {
-            background: #555;
-            border-radius: 4px;
-        }
-
-        #log-container::-webkit-scrollbar-thumb:hover {
-            background: #777;
-        }
-
-        .log-entry {
-            margin-bottom: 8px;
-            word-break: break-all;
-        }
-
-        .log-entry span {
-            color: #888;
-            margin-right: 10px;
-        }
-
-        .log-success {
-            color: #28a745;
-        }
-
-        .log-error {
-            color: #dc3545;
-        }
-
-        .log-warn {
-            color: #ffc107;
-        }
-
-        .log-info {
-            color: #17a2b8;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-
-        th,
-        td {
-            padding: 15px;
-            border-bottom: 1px solid var(--color-border);
-            text-align: left;
-            transition: border-color 0.3s ease;
-        }
-
-        th {
-            background-color: var(--color-bg);
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: var(--color-text-secondary);
-            transition: background-color 0.3s ease;
-        }
-
-        tbody tr {
-            transition: background-color 0.2s ease;
-        }
-
-        tbody tr:hover {
-            background-color: var(--color-input-bg);
-        }
-
-        hr {
-            border: 0;
-            height: 1px;
-            background: var(--color-border);
-            margin: 30px 0;
-            transition: background-color 0.3s ease;
-        }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 1rem;
-                padding-top: 6rem;
-            }
-
-            #theme-switcher {
-                top: 1rem;
-                right: 1rem;
-            }
-
-            .header h1 {
-                font-size: 2rem;
-            }
-
-            .card {
-                padding: 20px;
-            }
-
-            .button-group {
-                flex-direction: column;
-            }
-        }
+            --color-bg: #121212; --color-surface: #1e1e1e; --color-primary: #3793ff; --color-primary-hover: #5fa5ff;
+            --color-danger: #e5484d; --color-danger-hover: #ff5c61; --color-text: #e9ecef; --color-text-secondary: #adb5bd;
+            --color-border: #343a40; --color-input-bg: #2c2c2e; --shadow-color: rgba(0, 0, 0, 0.4);
+        }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: var(--color-bg); color: var(--color-text); margin: 0; padding: 2rem; line-height: 1.6; transition: background-color 0.3s ease, color 0.3s ease; }
+        #theme-switcher { position: fixed; top: 2rem; right: 2rem; width: 45px; height: 45px; background-color: var(--color-surface); border: 1px solid var(--color-border); border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px var(--shadow-color); transition: all 0.3s ease; overflow: hidden; z-index: 1000; }
+        #theme-switcher:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 4px 12px var(--shadow-color); }
+        #theme-switcher .icon { font-size: 1.2rem; position: absolute; transition: transform 0.4s ease, opacity 0.4s ease; }
+        #theme-switcher .sun { color: #f5a623; } #theme-switcher .moon { color: #50b1f5; }
+        [data-theme="light"] .moon { transform: translateY(100%) rotate(90deg); opacity: 0; }
+        [data-theme="light"] .sun { transform: translateY(0) rotate(0); opacity: 1; }
+        [data-theme="dark"] .sun { transform: translateY(-100%) rotate(-90deg); opacity: 0; }
+        [data-theme="dark"] .moon { transform: translateY(0) rotate(0); opacity: 1; }
+        .main-container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 25px; }
+        .header { margin-bottom: 1rem; animation: fadeInUp 0.5s ease-out forwards; }
+        .header h1 { font-size: 2.5rem; font-weight: 700; margin: 0; }
+        .header p { font-size: 1.1rem; color: var(--color-text-secondary); margin-top: 5px; }
+        .card { background-color: var(--color-surface); border-radius: 12px; border: 1px solid var(--color-border); box-shadow: 0 4px 12px var(--shadow-color); padding: 25px 30px; box-sizing: border-box; transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease, border-color 0.3s ease; animation: fadeInUp 0.6s ease-out forwards; animation-delay: calc(var(--card-index) * 0.1s); opacity: 0; }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px var(--shadow-color); }
+        h2 { font-size: 1.5rem; margin-top: 0; padding-bottom: 15px; margin-bottom: 25px; border-bottom: 1px solid var(--color-border); font-weight: 600; transition: border-color 0.3s ease; }
+        .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; }
+        .status-box { background-color: var(--color-bg); padding: 20px; border-radius: 8px; border: 1px solid var(--color-border); text-align: center; transition: all 0.3s ease; }
+        .status-box .label { font-size: 0.9rem; color: var(--color-text-secondary); margin-bottom: 10px; font-weight: 500; }
+        .status-box .value { font-size: 2.2rem; font-weight: 700; line-height: 1.2; }
+        .status-box .details { font-size: 0.8rem; color: var(--color-text-secondary); margin-top: 8px; height: 1.2em; }
+        .status-indicator { padding: 5px 15px; border-radius: 50px; color: white; font-size: 0.9rem; font-weight: 600; text-transform: capitalize; display: inline-block; }
+        .status-indicator.active, .status-indicator.running { background-color: var(--color-success); }
+        .status-indicator.paused { background-color: var(--color-warn); color: #1e1e1e;}
+        .status-indicator.cool_down { background-color: var(--color-info); }
+        .status-indicator.expiring_soon { background-color: var(--color-warn); color: #1e1e1e; }
+        .status-indicator.inactive { background-color: var(--color-inactive); }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--color-text-secondary); font-size: 0.9rem; }
+        input[type="text"], input[type="file"], input[type="datetime-local"], input[type="number"] { width: 100%; padding: 12px 15px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 1rem; box-sizing: border-box; background-color: var(--color-input-bg); color: var(--color-text); transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease, color 0.3s ease; }
+        input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 25%, transparent); }
+        input[type="file"] { background-color: var(--color-surface); } input::placeholder { color: var(--color-text-secondary); opacity: 0.7; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        form > .btn { margin-top: 10px; }
+        .btn:disabled { background-color: var(--color-inactive); cursor: not-allowed; color: #fff; opacity: 0.7; }
+        .btn .spinner { width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, 0.5); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .btn-primary { background-color: var(--color-primary); color: white; }
+        .btn-primary:hover:not(:disabled) { background-color: var(--color-primary-hover); transform: translateY(-2px); box-shadow: 0 4px 10px color-mix(in srgb, var(--color-primary) 30%, transparent); }
+        .btn-danger { background-color: var(--color-danger); color: white; }
+        .btn-danger:hover:not(:disabled) { background-color: var(--color-danger-hover); transform: translateY(-2px); box-shadow: 0 4px 10px color-mix(in srgb, var(--color-danger) 30%, transparent); }
+        .btn-secondary { background-color: var(--color-input-bg); color: var(--color-text); border: 1px solid var(--color-border); }
+        .btn-secondary:hover:not(:disabled) { background-color: var(--color-border); }
+        .button-group { display: flex; gap: 10px; }
+        #log-container { background-color: #1e2124; color: #e9ecef; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 0.9rem; height: 400px; overflow-y: auto; padding: 20px; border-radius: 8px; border: 1px solid #444; }
+        #log-container::-webkit-scrollbar { width: 8px; } #log-container::-webkit-scrollbar-track { background: #2a2d30; }
+        #log-container::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; } #log-container::-webkit-scrollbar-thumb:hover { background: #777; }
+        .log-entry { margin-bottom: 8px; word-break: break-all; } .log-entry span { color: #888; margin-right: 10px; }
+        .log-success { color: #28a745; } .log-error { color: #dc3545; } .log-warn { color: #ffc107; } .log-info { color: #17a2b8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 15px; border-bottom: 1px solid var(--color-border); text-align: left; transition: border-color 0.3s ease; }
+        th { background-color: var(--color-bg); font-weight: 600; font-size: 0.9rem; color: var(--color-text-secondary); transition: background-color 0.3s ease; }
+        tbody tr { transition: background-color 0.2s ease; } tbody tr:hover { background-color: var(--color-input-bg); }
+        hr { border: 0; height: 1px; background: var(--color-border); margin: 30px 0; transition: background-color 0.3s ease; }
+        
+        /* <<< ESTILOS PARA EL MODAL DE ALERTA >>> */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: none; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(5px); }
+        .modal-content { background: var(--color-surface); padding: 30px; border-radius: 12px; max-width: 500px; width: 90%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 1px solid var(--color-danger); }
+        .modal-content i { font-size: 3rem; color: var(--color-danger); margin-bottom: 15px; }
+        .modal-content h3 { margin: 0 0 10px 0; font-size: 1.5rem; }
+        .modal-content p { margin: 0 0 25px 0; color: var(--color-text-secondary); }
+
+        @media (max-width: 768px) { body { padding: 1rem; padding-top: 6rem; } #theme-switcher { top: 1rem; right: 1rem; } .header h1 { font-size: 2rem; } .card { padding: 20px; } .button-group { flex-direction: column; } }
     </style>
 </head>
 
@@ -485,6 +90,16 @@
         <i class="fas fa-sun icon sun"></i>
         <i class="fas fa-moon icon moon"></i>
     </button>
+    
+    <!-- <<< NUEVO: MODAL DE ALERTA OCULTO >>> -->
+    <div id="failure-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <i class="fas fa-exclamation-triangle"></i>
+            <h3>Fallo Crítico del Sistema</h3>
+            <p id="failure-modal-message">Mensaje de error aquí.</p>
+            <button id="reset-failure-button" class="btn btn-danger">Entendido, Resetear Estado</button>
+        </div>
+    </div>
 
     <div class="main-container">
         <header class="header">
@@ -494,87 +109,61 @@
 
         <div class="card" style="--card-index: 1;">
             <div class="status-grid">
-                <div class="status-box">
-                    <div class="label">Tareas en Cola</div>
-                    <div class="value" id="queue-count">0</div>
-                </div>
-                <div class="status-box">
-                    <div class="label">Números Libres</div>
-                    <div class="value" id="available-numbers-count" style="color: var(--color-success);">0</div>
-                </div>
-                <div class="status-box">
-                    <div class="label">Números Ocupados</div>
-                    <div class="value" id="active-numbers-count" style="color: var(--color-warn);">0</div>
-                </div>
-                <div class="status-box">
-                    <div class="label">Estado Conversación</div>
-                    <div class="value"><span id="conversation-status-indicator"
-                            class="status-indicator inactive">Inactiva</span></div>
-                    <div class="details" id="conversation-status-details">&nbsp;</div>
-                </div>
+                <div class="status-box"> <div class="label">Tareas en Cola</div> <div class="value" id="queue-count">0</div> </div>
+                <div class="status-box"> <div class="label">Números Libres</div> <div class="value" id="available-numbers-count" style="color: var(--color-success);">0</div> </div>
+                <div class="status-box"> <div class="label">Números Ocupados</div> <div class="value" id="active-numbers-count" style="color: var(--color-warn);">0</div> </div>
+                <div class="status-box"> <div class="label">Estado Conversación</div> <div class="value"><span id="conversation-status-indicator" class="status-indicator inactive">Inactiva</span></div> <div class="details" id="conversation-status-details">&nbsp;</div> </div>
             </div>
         </div>
-
+        
         <div class="card" style="--card-index: 2;">
             <h2><i class="fa-solid fa-sliders" style="color: var(--color-text-secondary);"></i> Control de la Cola</h2>
             <div class="status-grid">
                 <div class="status-box">
                     <div class="label">Estado del Procesamiento</div>
-                    <div class="value"><span id="queue-status-indicator" class="status-indicator running">Activa</span>
-                    </div>
+                    <div class="value"><span id="queue-status-indicator" class="status-indicator running">Activa</span></div>
                 </div>
                 <div class="status-box" style="grid-column: span 2;">
                     <div class="label">Acciones</div>
                     <div class="button-group">
-                        <button id="toggle-pause-button" class="btn btn-secondary"><i class="fa-solid fa-pause"></i>
-                            <span>Pausar Cola</span></button>
-                        <button id="clear-queue-button" class="btn btn-danger"><i class="fa-solid fa-broom"></i> Limpiar
-                            Cola</button>
+                        <button id="toggle-pause-button" class="btn btn-secondary"><i class="fa-solid fa-pause"></i> <span>Pausar Cola</span></button>
+                        <button id="clear-queue-button" class="btn btn-danger"><i class="fa-solid fa-broom"></i> Limpiar Cola</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="card" style="--card-index: 3;">
-            <h2><i class="fa-solid fa-paper-plane" style="color: var(--color-primary);"></i> Envío Masivo de Imágenes
-            </h2>
+            <h2><i class="fa-solid fa-paper-plane" style="color: var(--color-primary);"></i> Envío Masivo de Imágenes</h2>
             <form id="zip-form">
                 <div class="form-group">
                     <label for="destinationNumber">Número de Destino</label>
-                    <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 5491122334455"
-                        required>
+                    <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
                 </div>
                 <div class="form-group">
                     <label for="zipFile">Archivo ZIP con Imágenes</label>
                     <input type="file" id="zipFile" name="zipFile" accept=".zip" required>
                 </div>
-                <button type="submit" id="submitButton" class="btn btn-primary"><i class="fa-solid fa-upload"></i> Subir
-                    y Despachar Tareas</button>
+                <button type="submit" id="submitButton" class="btn btn-primary"><i class="fa-solid fa-upload"></i> Subir y Despachar Tareas</button>
             </form>
         </div>
 
         <div class="card" style="--card-index: 4;">
-            <h2><i class="fa-solid fa-download" style="color: var(--color-text-secondary);"></i> Reportes y Descargas
-            </h2>
+            <h2><i class="fa-solid fa-download" style="color: var(--color-text-secondary);"></i> Reportes y Descargas</h2>
             <div class="button-group">
-                <button id="download-excel-button" class="btn btn-secondary"><i class="fa-solid fa-file-excel"
-                        style="color: var(--color-success);"></i> Descargar Excel (Confirmados)</button>
-                <button id="download-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive"
-                        style="color: var(--color-primary);"></i> Descargar ZIP (Confirmados)</button>
-                <button id="download-not-confirmed-zip-button" class="btn btn-secondary"><i
-                        class="fa-solid fa-file-archive" style="color: var(--color-danger);"></i> Descargar ZIP (No
-                    Confirmados)</button>
+                <button id="download-excel-button" class="btn btn-secondary"><i class="fa-solid fa-file-excel" style="color: var(--color-success);"></i> Descargar Excel (Confirmados)</button>
+                <button id="download-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive" style="color: var(--color-primary);"></i> Descargar ZIP (Confirmados)</button>
+                <button id="download-not-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive" style="color: var(--color-danger);"></i> Descargar ZIP (No Confirmados)</button>
             </div>
         </div>
-
+        
         <div class="card" style="--card-index: 5;">
             <h2><i class="fa-solid fa-terminal" style="color: var(--color-text-secondary);"></i> Log de Actividad</h2>
             <div id="log-container"></div>
         </div>
 
         <div class="card" style="--card-index: 6;">
-            <h2><i class="fa-solid fa-wrench" style="color: var(--color-text-secondary);"></i> Herramientas y
-                Configuración</h2>
+            <h2><i class="fa-solid fa-wrench" style="color: var(--color-text-secondary);"></i> Herramientas y Configuración</h2>
             <form id="check-status-form">
                 <label for="checkNumber">Consultar Estado de Conversación</label>
                 <input type="text" id="checkNumber" name="checkNumber" placeholder="Ej: 5491122334455" required>
@@ -583,11 +172,10 @@
             <hr>
             <form id="manual-activate-form">
                 <label for="activateNumber">Activar Conversación Manualmente</label>
-                <input type="text" id="activateNumber" name="destinationNumber" placeholder="Ej: 5491122334455"
-                    required>
+                <input type="text" id="activateNumber" name="destinationNumber" placeholder="Ej: 5491122334455" required>
                 <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-power-off"></i> Activar</button>
             </form>
-            <hr>
+             <hr>
             <form id="delay-settings-form">
                 <label for="delay1">Delay 1 (tras 1er mensaje, ms)</label>
                 <input type="number" id="delay1" name="delay1" min="0" required>
@@ -603,55 +191,33 @@
                 <input type="text" id="debugNumber" name="recipientNumber" placeholder="Ej: 5491122334455" required>
                 <label for="newTimestamp">Nueva Fecha y Hora de Activación</label>
                 <input type="datetime-local" id="newTimestamp" name="newTimestamp" required>
-                <button type="submit" class="btn btn-danger"><i class="fa-solid fa-exclamation-triangle"></i>
-                    Forzar</button>
+                <button type="submit" class="btn btn-danger"><i class="fa-solid fa-exclamation-triangle"></i> Forzar</button>
             </form>
         </div>
 
         <div class="card" style="--card-index: 7;">
-            <h2><i class="fa-solid fa-check-circle" style="color: var(--color-success);"></i> Respuestas: Confirmados
-            </h2>
-            <div class="button-group">
-                <button id="viewConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar
-                    Lista</button>
-                <button id="clearConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar
-                    Lista</button>
+             <h2><i class="fa-solid fa-check-circle" style="color: var(--color-success);"></i> Respuestas: Confirmados</h2>
+             <div class="button-group">
+                <button id="viewConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar Lista</button>
+                <button id="clearConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar Lista</button>
             </div>
             <table>
-                <thead>
-                    <tr>
-                        <th>Cédula</th>
-                        <th>Fecha Nacimiento</th>
-                        <th>Número</th>
-                        <th>Fecha Confirmación</th>
-                    </tr>
-                </thead>
+                <thead> <tr> <th>Cédula</th> <th>Fecha Nacimiento</th> <th>Número</th> <th>Fecha Confirmación</th> </tr> </thead>
                 <tbody id="confirmedTableBody"></tbody>
             </table>
         </div>
 
         <div class="card" style="--card-index: 8;">
-            <h2><i class="fa-solid fa-times-circle" style="color: var(--color-danger);"></i> Respuestas: No Confirmados
-            </h2>
+            <h2><i class="fa-solid fa-times-circle" style="color: var(--color-danger);"></i> Respuestas: No Confirmados</h2>
             <div class="button-group">
-                <button id="viewNotConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i>
-                    Actualizar Lista</button>
-                <!-- <<< NUEVO BOTÓN PARA LIMPIAR NO CONFIRMADOS >>> -->
-                <button id="clearNotConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i>
-                    Limpiar Lista</button>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Cédula</th>
-                        <th>Fecha Nacimiento</th>
-                        <th>Número</th>
-                        <th>Fecha Registro</th>
-                    </tr>
-                </thead>
-                <tbody id="notConfirmedTableBody"></tbody>
-            </table>
-        </div>
+               <button id="viewNotConfirmedButton" class="btn btn-primary"><i class="fa-solid fa-sync-alt"></i> Actualizar Lista</button>
+               <button id="clearNotConfirmedButton" class="btn btn-danger"><i class="fa-solid fa-trash-alt"></i> Limpiar Lista</button>
+           </div>
+           <table>
+               <thead> <tr> <th>Cédula</th> <th>Fecha Nacimiento</th> <th>Número</th> <th>Fecha Registro</th> </tr> </thead>
+               <tbody id="notConfirmedTableBody"></tbody>
+           </table>
+       </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -659,7 +225,7 @@
         function setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
         document.getElementById('theme-switcher').addEventListener('click', () => { const currentTheme = document.documentElement.getAttribute('data-theme'); const newTheme = currentTheme === 'dark' ? 'light' : 'dark'; setTheme(newTheme); });
         (() => { const savedTheme = localStorage.getItem('theme'); const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; if (savedTheme) { setTheme(savedTheme); } else if (prefersDark) { setTheme('dark'); } })();
-
+        
         const socket = io();
         const logContainer = document.getElementById('log-container');
         const queueCount = document.getElementById('queue-count');
@@ -681,10 +247,15 @@
         const viewConfirmedButton = document.getElementById('viewConfirmedButton');
         const clearConfirmedButton = document.getElementById('clearConfirmedButton');
         const viewNotConfirmedButton = document.getElementById('viewNotConfirmedButton');
-        const clearNotConfirmedButton = document.getElementById('clearNotConfirmedButton'); // <<< Selector para el nuevo botón
+        const clearNotConfirmedButton = document.getElementById('clearNotConfirmedButton');
         const downloadExcelButton = document.getElementById('download-excel-button');
         const downloadConfirmedZipButton = document.getElementById('download-confirmed-zip-button');
         const downloadNotConfirmedZipButton = document.getElementById('download-not-confirmed-zip-button');
+
+        // <<< NUEVOS SELECTORES PARA EL MODAL DE ALERTA >>>
+        const failureModalOverlay = document.getElementById('failure-modal-overlay');
+        const failureModalMessage = document.getElementById('failure-modal-message');
+        const resetFailureButton = document.getElementById('reset-failure-button');
 
         function addLog(message) {
             const entry = document.createElement('div'); entry.className = `log-entry ${message.type || 'log-info'}`;
@@ -699,18 +270,29 @@
         delayForm.addEventListener('submit', async (e) => { e.preventDefault(); const button = e.target.querySelector('button'); const data = { delay1: delay1Input.value, delay2: delay2Input.value, taskSeparation: taskSeparationInput.value, }; button.disabled = true; try { const response = await fetch('/update-delays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error al actualizar delays: ${error.message}`, type: 'log-error' }); } finally { button.disabled = false; } });
         document.getElementById('debug-form').addEventListener('submit', async (e) => { e.preventDefault(); const data = Object.fromEntries(new FormData(e.target).entries()); if (!data.recipientNumber || !data.newTimestamp) return; try { const response = await fetch('/debug-update-window', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.message); addLog({ text: `✅ ${result.message}`, type: 'log-success' }); } catch (error) { addLog({ text: `❌ Error al forzar fecha: ${error.message}`, type: 'log-error' }); } });
 
-        togglePauseButton.addEventListener('click', async () => { const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue'; togglePauseButton.disabled = true; try { const response = await fetch(endpoint, { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: `❌ Error al ${isQueuePausedByAdmin ? 'reanudar' : 'pausar'} la cola.`, type: 'log-error' }); } finally { togglePauseButton.disabled = false; } });
+        togglePauseButton.addEventListener('click', async () => { const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue'; togglePauseButton.disabled = true; try { const response = await fetch(endpoint, { method: 'POST' }); if (!response.ok) { const error = await response.json(); throw new Error(error.message); } } catch (error) { addLog({ text: `❌ Error: ${error.message}`, type: 'log-error' }); } finally { togglePauseButton.disabled = false; } });
         clearQueueButton.addEventListener('click', async () => { if (confirm("¿Estás SEGURO de que quieres borrar TODAS las tareas pendientes?")) { clearQueueButton.disabled = true; try { const response = await fetch('/clear-queue', { method: 'POST' }); if (!response.ok) throw new Error('Error de servidor'); } catch (error) { addLog({ text: '❌ Error al limpiar la cola.', type: 'log-error' }); } finally { clearQueueButton.disabled = false; } } });
-
         viewConfirmedButton.addEventListener('click', () => socket.emit('ver-confirmados'));
         clearConfirmedButton.addEventListener('click', () => { if (confirm("¿Borrar TODAS las confirmaciones?")) socket.emit('limpiar-confirmados'); });
         viewNotConfirmedButton.addEventListener('click', () => socket.emit('ver-no-confirmados'));
-        // <<< EVENT LISTENER PARA EL NUEVO BOTÓN >>>
         clearNotConfirmedButton.addEventListener('click', () => { if (confirm("¿Borrar TODA la lista de 'no confirmados'?")) socket.emit('limpiar-no-confirmados'); });
-
         downloadExcelButton.addEventListener('click', () => window.location.href = '/download-confirmed-excel');
         downloadConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-confirmed-zip');
         downloadNotConfirmedZipButton.addEventListener('click', () => window.location.href = '/download-not-confirmed-zip');
+
+        // <<< NUEVA LÓGICA PARA EL BOTÓN DE RESET DEL MODAL >>>
+        resetFailureButton.addEventListener('click', async () => {
+            resetFailureButton.disabled = true;
+            try {
+                const response = await fetch('/reset-bot-failure', { method: 'POST' });
+                if (!response.ok) throw new Error('No se pudo resetear el estado.');
+                failureModalOverlay.style.display = 'none'; // Ocultamos el modal
+            } catch (error) {
+                addLog({ text: `❌ ${error.message}`, type: 'log-error' });
+            } finally {
+                resetFailureButton.disabled = false;
+            }
+        });
 
         // --- Funciones para renderizar las tablas ---
         function renderConfirmedTable(data) { confirmedTableBody.innerHTML = ''; if (!data || data.length === 0) { confirmedTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay confirmaciones.</td></tr>'; return; } data.forEach(row => { const tr = document.createElement('tr'); const formattedDateNac = row.fecha_nacimiento ? new Date(row.fecha_nacimiento).toLocaleDateString('es-ES') : 'N/A'; const formattedDateConf = new Date(row.confirmado_en).toLocaleString('es-ES'); tr.innerHTML = `<td>${row.cedula}</td><td>${formattedDateNac}</td><td>${row.numero_confirmado}</td><td>${formattedDateConf}</td>`; confirmedTableBody.appendChild(tr); }); }
@@ -730,16 +312,20 @@
         socket.on('queue-status-update', ({ isPaused }) => {
             isQueuePausedByAdmin = isPaused;
             const buttonTextSpan = togglePauseButton.querySelector('span'); const buttonIcon = togglePauseButton.querySelector('i');
-            if (isPaused) {
-                queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused'; buttonTextSpan.textContent = 'Reanudar Cola'; buttonIcon.className = 'fa-solid fa-play'; togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
+            if (isPaused) { queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused'; buttonTextSpan.textContent = 'Reanudar Cola'; buttonIcon.className = 'fa-solid fa-play'; togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
             } else { queueStatusIndicator.textContent = 'Activa'; queueStatusIndicator.className = 'status-indicator running'; buttonTextSpan.textContent = 'Pausar Cola'; buttonIcon.className = 'fa-solid fa-pause'; togglePauseButton.classList.remove('btn-primary'); togglePauseButton.classList.add('btn-secondary'); }
         });
-        socket.on('bot-failure', ({ message }) => {
-            // Usamos alert() porque es un error crítico que el usuario no debe ignorar.
-            alert(message);
-            // Opcional: podrías mostrar esto en un modal más elegante si prefieres.
+
+        // <<< NUEVOS EVENTOS PARA EL MODAL DE ALERTA >>>
+        socket.on('bot-failure', (failureInfo) => {
+            failureModalMessage.textContent = failureInfo.message;
+            failureModalOverlay.style.display = 'flex';
+        });
+
+        socket.on('bot-failure-resolved', () => {
+            failureModalOverlay.style.display = 'none';
+            addLog({ text: '✅ Estado de fallo reseteado. El sistema vuelve a estar operativo.', type: 'log-success' });
         });
     </script>
 </body>
-
 </html>
