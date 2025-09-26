@@ -539,9 +539,7 @@ async function startServer() {
             console.log(`🚀 Servidor iniciado en puerto ${PORT}.`);
             const unaSemanaEnMs = 7 * 24 * 60 * 60 * 1000;
 
-            console.log('🧹 Limpieza inicial de archivos...');
-            cleanupOldFiles(ARCHIVED_DIR, unaSemanaEnMs);
-            cleanupOldFiles(ZIPS_DIR, unaSemanaEnMs);
+            
 
             setInterval(() => {
                 console.log('🧹 Ejecutando limpieza periódica...');
