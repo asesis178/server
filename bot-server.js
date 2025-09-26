@@ -218,6 +218,7 @@ io.on('connection', async (socket) => {
 app.use('/assets', express.static(ASSETS_DIR)); // Assets públicos
 app.use('/zips', requireAuth, express.static(ZIPS_DIR)); // ZIPs protegidos
 app.get('/', (req, res) => res.send('Servidor activo. Visita /dashboard o /panel para operar.'));
+app.use('/uploads/pending', express.static(PENDING_DIR));
 
 // <<< NUEVO: Endpoint para el Dashboard de Usuario >>>
 app.get('/panel', requireAuth, (req, res) => {
