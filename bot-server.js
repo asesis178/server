@@ -145,7 +145,7 @@ io.on('connection', async (socket) => {
     } catch (e) {
         console.error("Error al obtener contadores iniciales para el nuevo cliente:", e.message);
     }
-    
+
     // --- Listeners para acciones que vienen del cliente ---
     socket.on('request-window-status', async ({ number }) => {
         try {
@@ -200,7 +200,7 @@ io.on('connection', async (socket) => {
             await pool.query('TRUNCATE TABLE no_confirmados');
             io.emit('datos-no-confirmados', []); // Notifica a todos para vaciar la tabla visual
             logAndEmit("✅ DB de 'no confirmados' limpiada.", 'log-success');
-            
+
             // Recalculamos y emitimos los contadores actualizados a todos
             const confirmedCountResult = await pool.query('SELECT COUNT(*) FROM confirmados');
             io.emit('stats-update', {
@@ -259,7 +259,7 @@ app.post('/webhook', async (req, res) => {
         logAndEmit(`[Webhook] 🗂️ Imagen para CI ${cedula} archivada en '${status}'.`, 'log-info');
         await pool.query(`INSERT INTO ${tableName} (cedula, fecha_nacimiento, ${numberColumn}) VALUES ($1, $2, $3) ON CONFLICT (cedula) DO NOTHING`, [cedula, fechaNac, from]);
         logAndEmit(`[Webhook] ✅ Registro guardado: ${status} para CI ${cedula}.`, 'log-success');
-        
+
         // <<< NUEVO: Emitir contadores actualizados >>>
         const confirmedCount = (await pool.query('SELECT COUNT(*) FROM confirmados')).rows[0].count;
         const notConfirmedCount = (await pool.query('SELECT COUNT(*) FROM no_confirmados')).rows[0].count;
@@ -328,9 +328,98 @@ app.post('/update-delays', requireAuth, requireAdmin, (req, res) => { const { de
 // --- LÓGICA DE PROCESAMIENTO DE TAREAS ---
 function releaseWorkerAndContinue(workerIndex) { availableWorkers.add(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); setTimeout(processQueue, delaySettings.taskSeparation); }
 async function processQueue() { if (taskQueue.length === 0) { stopWebhookWatchdog(); } if (isQueueProcessingPaused || isConversationCheckPaused || availableWorkers.size === 0 || taskQueue.length === 0) { if (taskQueue.length > 0) io.emit('window-status-update', await getConversationWindowState(taskQueue[0].recipientNumber)); return; } startWebhookWatchdog(); const nextRecipient = taskQueue[0].recipientNumber; const windowState = await getConversationWindowState(nextRecipient); io.emit('window-status-update', windowState); if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') { if (!isConversationCheckPaused) { logAndEmit(`⏸️ Cola en espera para ${nextRecipient}: ${windowState.details}`, 'log-warn'); isConversationCheckPaused = true; } setTimeout(() => { isConversationCheckPaused = false; logAndEmit('▶️ Reanudando la cola...', 'log-info'); processQueue(); }, 30000); return; } isConversationCheckPaused = false; while (availableWorkers.size > 0 && taskQueue.length > 0 && !isQueueProcessingPaused) { const workerIndex = availableWorkers.values().next().value; availableWorkers.delete(workerIndex); io.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size }); const task = taskQueue.shift(); io.emit('queue-update', taskQueue.length); try { await pool.query('UPDATE envios SET estado = $1, remitente_usado = $2 WHERE id = $3', ['procesando', senderPool[workerIndex].id, task.id]); logAndEmit(`▶️ [Worker ${workerIndex}] iniciando tarea #${task.id}`, 'log-info'); executeUnifiedSendSequence(task, workerIndex); } catch (dbError) { logAndEmit(`❌ Error de DB al iniciar tarea #${task.id}: ${dbError.message}`, 'log-error'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); releaseWorkerAndContinue(workerIndex); } } }
-async function executeUnifiedSendSequence(task, workerIndex) { const { id, recipientNumber, imageName } = task; const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; try { const windowState = await getConversationWindowState(recipientNumber); if (windowState.status === 'INACTIVE') { logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para #${id}. Activando...`, 'log-warn'); taskQueue.unshift(task); io.emit('queue-update', taskQueue.length); await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]); await executeActivationSequence(recipientNumber, workerIndex); return; } logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`; await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(2000); logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success'); await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]); releaseWorkerAndContinue(workerIndex); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló secuencia para #${id}: ${errorMessage}`, 'log-error'); await pool.query("UPDATE envios SET estado = 'failed' WHERE id = $1", [id]); releaseWorkerAndContinue(workerIndex); } }
-async function executeActivationSequence(recipientNumber, workerIndex) { const sender = senderPool[workerIndex]; const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`; const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' }; const publicImageUrl = `${RENDER_EXTERNAL_URL}/assets/${ACTIVATION_IMAGE_NAME}`; try { logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template (pago)...`, 'log-info'); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS }); await delay(delaySettings.delay1); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS }); await delay(delaySettings.delay2); await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS }); await delay(5000); await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW()) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`, [recipientNumber]); logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success'); const state = await getConversationWindowState(recipientNumber); io.emit('window-status-update', state); } catch (error) { const errorMessage = error.response?.data?.error?.message || error.message; logAndEmit(`[Worker ${workerIndex}] 🚫 Falló activación: ${errorMessage}`, 'log-error'); } finally { releaseWorkerAndContinue(workerIndex); } }
-async function cleanupOldFiles(directory, maxAge) { try { const files = await fs.readdir(directory); for (const file of files) { const filePath = path.join(directory, file); const stats = await fs.stat(filePath); if (stats.isDirectory()) { await cleanupOldFiles(filePath, maxAge); } else if (Date.now() - stats.mtime.getTime() > maxAge) { await fs.unlink(filePath); console.log(`🧹 Archivo antiguo borrado: ${filePath}`); } } } catch (err) { if (err.code !== 'ENOENT') { console.error(`Error al limpiar ${directory}:`, err); } } }
+// REEMPLAZA LAS DOS FUNCIONES EN TU server.js CON ESTE BLOQUE COMPLETO
+
+async function executeUnifiedSendSequence(task, workerIndex) {
+    const { id, recipientNumber, imageName } = task;
+    const sender = senderPool[workerIndex];
+    const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
+    const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+
+    try {
+        const windowState = await getConversationWindowState(recipientNumber);
+        if (windowState.status === 'INACTIVE') {
+            logAndEmit(`[Worker ${workerIndex}] ⚠️ Ventana cerrada para #${id}. Activando...`, 'log-warn');
+            taskQueue.unshift(task);
+            io.emit('queue-update', taskQueue.length);
+            await pool.query("UPDATE envios SET estado = 'pending' WHERE id = $1", [id]);
+            await executeActivationSequence(recipientNumber, workerIndex);
+            return;
+        }
+
+        logAndEmit(`[Worker ${workerIndex}] 📤 1/3: Enviando "activar" para #${id}...`, 'log-info');
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "activar" } }, { headers: HEADERS });
+        await delay(delaySettings.delay1);
+
+        logAndEmit(`[Worker ${workerIndex}] 📤 2/3: Enviando "3" para #${id}...`, 'log-info');
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
+        await delay(delaySettings.delay2);
+
+        // <<< CORRECCIÓN CLAVE #1: CONSTRUIR LA URL PÚBLICA CORRECTAMENTE >>>
+        // La URL debe apuntar al endpoint público que creamos, no a la ruta del sistema de archivos.
+        const publicImageUrl = `${RENDER_EXTERNAL_URL}/uploads/pending/${imageName}`;
+        logAndEmit(`[Worker ${workerIndex}] 📤 3/3: Enviando imagen para #${id} desde ${publicImageUrl}`, 'log-info');
+
+        await axios.post(API_URL, {
+            messaging_product: "whatsapp",
+            to: recipientNumber,
+            type: "image",
+            image: { link: publicImageUrl }
+        }, { headers: HEADERS });
+
+        await delay(2000); // Delay de cortesía para asegurar el procesamiento de la imagen
+
+        logAndEmit(`[Worker ${workerIndex}] ✅ Secuencia completada para #${id}.`, 'log-success');
+        await pool.query('UPDATE envios SET estado = $1 WHERE id = $2', ['enviado', id]);
+
+    } catch (error) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló secuencia para #${id}: ${errorMessage}`, 'log-error');
+        await pool.query("UPDATE envios SET estado = 'failed' WHERE id = $1", [id]);
+
+    } finally {
+        // <<< CORRECCIÓN CLAVE #2: ASEGURAR LA LIBERACIÓN DEL WORKER >>>
+        // El worker se libera aquí SIEMPRE, tanto en éxito como en fallo,
+        // garantizando que la cola no se bloquee.
+        releaseWorkerAndContinue(workerIndex);
+    }
+}
+
+async function executeActivationSequence(recipientNumber, workerIndex) {
+    const sender = senderPool[workerIndex];
+    const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
+    const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+
+    // La URL de la imagen de activación es diferente, apunta a /assets
+    const publicImageUrl = `${RENDER_EXTERNAL_URL}/assets/${ACTIVATION_IMAGE_NAME}`;
+
+    try {
+        logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template de activación (pago)...`, 'log-info');
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "template", template: { name: "hello_world", language: { code: "en_US" } } }, { headers: HEADERS });
+        await delay(delaySettings.delay1);
+
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "text", text: { body: "3" } }, { headers: HEADERS });
+        await delay(delaySettings.delay2);
+
+        logAndEmit(`[Worker ${workerIndex}] 📤 Enviando imagen de activación desde ${publicImageUrl}`, 'log-info');
+        await axios.post(API_URL, { messaging_product: "whatsapp", to: recipientNumber, type: "image", image: { link: publicImageUrl } }, { headers: HEADERS });
+        await delay(5000);
+
+        await pool.query(`INSERT INTO conversation_windows (recipient_number, last_activation_time) VALUES ($1, NOW()) ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`, [recipientNumber]);
+        logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success');
+
+        const state = await getConversationWindowState(recipientNumber);
+        io.emit('window-status-update', state);
+
+    } catch (error) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        logAndEmit(`[Worker ${workerIndex}] 🚫 Falló activación: ${errorMessage}`, 'log-error');
+
+    } finally {
+        // <<< CORRECCIÓN CLAVE #2 (Aplicada aquí también) >>>
+        releaseWorkerAndContinue(workerIndex);
+    }
+} async function cleanupOldFiles(directory, maxAge) { try { const files = await fs.readdir(directory); for (const file of files) { const filePath = path.join(directory, file); const stats = await fs.stat(filePath); if (stats.isDirectory()) { await cleanupOldFiles(filePath, maxAge); } else if (Date.now() - stats.mtime.getTime() > maxAge) { await fs.unlink(filePath); console.log(`🧹 Archivo antiguo borrado: ${filePath}`); } } } catch (err) { if (err.code !== 'ENOENT') { console.error(`Error al limpiar ${directory}:`, err); } } }
 
 // --- INICIO DEL SERVIDOR ---
 async function startServer() {
