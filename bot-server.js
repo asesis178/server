@@ -123,21 +123,95 @@ async function initializeDatabase() { const client = await pool.connect(); try {
 async function loadPendingTasks() { try { logAndEmit('🔄 Cargando tareas pendientes...', 'log-info'); const res = await pool.query("SELECT id, numero_destino, nombre_imagen FROM envios WHERE estado IN ('pending', 'procesando') ORDER BY id ASC"); if (res.rowCount > 0) { taskQueue = res.rows.map(row => ({ id: row.id, recipientNumber: row.numero_destino, imageName: row.nombre_imagen })); logAndEmit(`✅ ${taskQueue.length} tareas cargadas.`, 'log-success'); } else { logAndEmit('👍 No se encontraron tareas pendientes.', 'log-info'); } io.emit('queue-update', taskQueue.length); } catch (error) { logAndEmit(`❌ Error fatal al cargar tareas: ${error.message}`, 'log-error'); process.exit(1); } }
 
 // --- LÓGICA DE SOCKET.IO ---
+// --- LÓGICA DE SOCKET.IO ---
 io.on('connection', async (socket) => {
+    // --- Eventos que se envían al cliente nuevo al conectarse ---
     socket.emit('queue-update', taskQueue.length);
     socket.emit('workers-status-update', { available: availableWorkers.size, active: senderPool.length - availableWorkers.size });
     socket.emit('initial-delay-settings', delaySettings);
     socket.emit('queue-status-update', { isPaused: isQueueProcessingPaused });
-    if (botFailureInfo.hasFailed) { socket.emit('bot-failure', botFailureInfo); }
 
-    // <<< NUEVO: Enviar contadores al conectar >>>
+    if (botFailureInfo.hasFailed) {
+        socket.emit('bot-failure', botFailureInfo);
+    }
+
     try {
-        const confirmedCount = (await pool.query('SELECT COUNT(*) FROM confirmados')).rows[0].count;
-        const notConfirmedCount = (await pool.query('SELECT COUNT(*) FROM no_confirmados')).rows[0].count;
-        socket.emit('stats-update', { confirmed: confirmedCount, notConfirmed: notConfirmedCount });
-    } catch(e) { console.error("Error al obtener contadores iniciales"); }
+        const confirmedCountResult = await pool.query('SELECT COUNT(*) FROM confirmados');
+        const notConfirmedCountResult = await pool.query('SELECT COUNT(*) FROM no_confirmados');
+        socket.emit('stats-update', {
+            confirmed: confirmedCountResult.rows[0].count,
+            notConfirmed: notConfirmedCountResult.rows[0].count
+        });
+    } catch (e) {
+        console.error("Error al obtener contadores iniciales para el nuevo cliente:", e.message);
+    }
     
-    socket.on('request-window-status', async ({ number }) => { try { const state = await getConversationWindowState(number); let logType = 'log-info'; if (state.status === 'ACTIVE' || state.status === 'COOL_DOWN') logType = 'log-success'; if (state.status === 'INACTIVE' || state.status === 'EXPIRING_SOON') logType = 'log-warn'; socket.emit('status-update', { text: `[Consulta] Estado para ${number}: <strong>${state.status}</strong> (${state.details})`, type: logType }); } catch (error) { logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error'); } });
+    // --- Listeners para acciones que vienen del cliente ---
+    socket.on('request-window-status', async ({ number }) => {
+        try {
+            const state = await getConversationWindowState(number);
+            let logType = 'log-info';
+            if (state.status === 'ACTIVE' || state.status === 'COOL_DOWN') logType = 'log-success';
+            if (state.status === 'INACTIVE' || state.status === 'EXPIRING_SOON') logType = 'log-warn';
+            socket.emit('status-update', { text: `[Consulta] Estado para ${number}: <strong>${state.status}</strong> (${state.details})`, type: logType });
+        } catch (error) {
+            logAndEmit(`Error al consultar estado para ${number}: ${error.message}`, 'log-error');
+        }
+    });
+
+    socket.on('ver-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_confirmado, confirmado_en FROM confirmados ORDER BY confirmado_en DESC");
+            socket.emit('datos-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener confirmados:", dbError);
+        }
+    });
+
+    socket.on('ver-no-confirmados', async () => {
+        try {
+            const result = await pool.query("SELECT cedula, fecha_nacimiento, numero_no_confirmado, registrado_en FROM no_confirmados ORDER BY registrado_en DESC");
+            socket.emit('datos-no-confirmados', result.rows);
+        } catch (dbError) {
+            console.error("Error al obtener no confirmados:", dbError);
+        }
+    });
+
+    socket.on('limpiar-confirmados', async () => {
+        try {
+            await pool.query('TRUNCATE TABLE confirmados');
+            io.emit('datos-confirmados', []); // Notifica a todos para vaciar la tabla visual
+            logAndEmit("✅ DB de confirmados limpiada.", 'log-success');
+
+            // Recalculamos y emitimos los contadores actualizados a todos
+            const notConfirmedCountResult = await pool.query('SELECT COUNT(*) FROM no_confirmados');
+            io.emit('stats-update', {
+                confirmed: 0,
+                notConfirmed: notConfirmedCountResult.rows[0].count
+            });
+
+        } catch (dbError) {
+            logAndEmit("❌ Error al limpiar la DB de confirmados.", 'log-error');
+        }
+    });
+
+    socket.on('limpiar-no-confirmados', async () => {
+        try {
+            await pool.query('TRUNCATE TABLE no_confirmados');
+            io.emit('datos-no-confirmados', []); // Notifica a todos para vaciar la tabla visual
+            logAndEmit("✅ DB de 'no confirmados' limpiada.", 'log-success');
+            
+            // Recalculamos y emitimos los contadores actualizados a todos
+            const confirmedCountResult = await pool.query('SELECT COUNT(*) FROM confirmados');
+            io.emit('stats-update', {
+                confirmed: confirmedCountResult.rows[0].count,
+                notConfirmed: 0
+            });
+
+        } catch (dbError) {
+            logAndEmit("❌ Error al limpiar la DB de 'no confirmados'.", 'log-error');
+        }
+    });
 });
 
 // --- ENDPOINTS ---
