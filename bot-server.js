@@ -75,7 +75,8 @@ function startWebhookWatchdog() {
     if (webhookWatchdog || botFailureInfo.hasFailed) return; // No iniciar si ya está activo o si el sistema ya falló
     logAndEmit('🐶 Guardián del webhook activado. Esperando respuestas...', 'log-info');
     webhookWatchdog = setTimeout(async () => {
-        isQueueProcessingPaused = true;
+        isQueueProcessingPaused = true
+
         
         botFailureInfo = {
             hasFailed: true,
@@ -173,7 +174,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // --- ENDPOINTS DE ADMINISTRACIÓN (PROTEGIDOS) ---
-app.post('/subir-zip', requireAuth, async (req, res) => {
+app.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res) => {
     if (botFailureInfo.hasFailed) {
         return res.status(503).json({ message: 'El sistema está en estado de fallo. Por favor, resetee el estado desde el panel antes de subir nuevos archivos.' });
     }
