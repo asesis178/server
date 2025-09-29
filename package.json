@@ -2,9 +2,9 @@
   "name": "apiwasap",
   "version": "1.0.0",
   "description": "",
-  "main": "bot-server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node bot-server.js"
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
