@@ -1,2 +1,1 @@
-App.js
-bot-server.js
+git rm --cached App.js bot-server.js
