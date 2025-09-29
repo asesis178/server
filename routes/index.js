@@ -33,9 +33,9 @@ router.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message || message.type !== 'text') return;
-    
+
     helpers.resetWebhookWatchdog(db.pool);
-    
+
     const from = message.from;
     const textBody = message.text.body;
     const regex = /cedula:\s*(\d+)\s*fecha de nacimiento:\s*(\d{2}\/\d{2}\/\d{4})\s*ud (no )?esta habilitado/i;
@@ -121,7 +121,10 @@ router.post('/subir-zip', requireAuth, upload.single('zipFile'), async (req, res
             state.taskQueue.push(...newTasks);
             helpers.logAndEmit(`✅ ${newTasks.length} tareas agregadas.`, 'log-success');
             req.app.get('io').emit('queue-update', state.taskQueue.length);
-            queueProcessor.processQueue();
+            setTimeout(() => {
+                helpers.logAndEmit('▶️ Iniciando procesamiento de la nueva cola.', 'log-info');
+                queueProcessor.processQueue();
+            }, 2000);
             res.status(200).json({ message: `Se encolaron ${newTasks.length} envíos.` });
         } catch (dbError) {
             await client.query('ROLLBACK');
