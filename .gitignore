@@ -1,1 +1,20 @@
-git rm --cached App.js bot-server.js
+# / .gitignore
+
+# Dependencias
+node_modules/
+
+# Archivos de entorno (¡MUY IMPORTANTE!)
+.env
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Archivos que quieres ignorar AHORA
+App.js
+bot.server.js
