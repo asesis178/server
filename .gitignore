@@ -16,5 +16,5 @@ yarn-debug.log*
 yarn-error.log*
 
 # Archivos que quieres ignorar AHORA
-App.js
-bot-server.js
+obsoleto/
+

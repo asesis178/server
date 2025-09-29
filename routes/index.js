@@ -25,8 +25,8 @@ router.use('/uploads/pending', express.static(dirs.PENDING_DIR));
 router.use('/zips', requireAuth, express.static(dirs.ZIPS_DIR));
 
 router.get('/', (req, res) => res.send('Servidor activo. Visita /panel para operar.'));
-router.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, '..', 'panelUser.html')));
-router.get('/panelAdmin', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', 'panelAdmin.html')));
+router.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelUser.html')));
+router.get('/panelAdmin', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelAdmin.html')));
 
 // --- WEBHOOK ---
 router.post('/webhook', async (req, res) => {
