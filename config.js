@@ -22,5 +22,5 @@ module.exports = {
     // Constantes de la Aplicación
     ACTIVATION_IMAGE_NAME: 'activation_image.jpeg',
     CONCURRENT_IMAGE_PROCESSING_LIMIT: 4, // Aunque no se usa explícitamente, lo mantenemos por si acaso.
-    WATCHDOG_TIMEOUT: 30000,
+    WATCHDOG_TIMEOUT: 120000,
 };

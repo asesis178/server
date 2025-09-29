@@ -35,7 +35,7 @@ function startWebhookWatchdog(dbPool) {
         state.isQueueProcessingPaused = true;
         state.botFailureInfo = {
             hasFailed: true,
-            message: `🚨 ¡FALLO CRÍTICO! No se han recibido respuestas del bot en ${config.WATCHDOG_TIMEOUT / 1000} segundos. La cola ha sido pausada y limpiada. Revise el bot receptor y resetee el estado desde el panel.`
+            message: `🚨 ¡FALLO CRÍTICO! No se han recibido respuestas del bot en ${config.WATCHDOG_TIMEOUT / 1000 / 60} minutos. La cola ha sido pausada y limpiada. Revise el bot receptor y porfavor vuelva a subir el ultim zip que subio`
         };
         io.emit('queue-status-update', { isPaused: true });
         logAndEmit(state.botFailureInfo.message, 'log-error');
