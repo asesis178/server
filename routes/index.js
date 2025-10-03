@@ -28,7 +28,7 @@ router.get('/', (req, res) => res.send('Servidor activo. Visita /panel para oper
 router.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelUser.html')));
 router.get('/panelAdmin', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelAdmin.html')));
 
-router.get('/webhook-viewer', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', 'chat.html')));
+router.get('/chat', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/chat.html')));
 
 
 // --- WEBHOOK ---
