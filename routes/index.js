@@ -28,20 +28,39 @@ router.get('/', (req, res) => res.send('Servidor activo. Visita /panel para oper
 router.get('/panel', requireAuth, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelUser.html')));
 router.get('/panelAdmin', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', '/paneles/panelAdmin.html')));
 
+router.get('/webhook-viewer', requireAuth, requireAdmin, (req, res) => res.sendFile(path.join(__dirname, '..', 'chat.html')));
+
+
 // --- WEBHOOK ---
 router.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    
+    // Ignorar si no es un mensaje de texto
     if (!message || message.type !== 'text') return;
-
+    
+    // Reseteamos el guardián con cualquier mensaje de texto recibido
     helpers.resetWebhookWatchdog(db.pool);
-
+    
     const from = message.from;
     const textBody = message.text.body;
     const regex = /cedula:\s*(\d+)\s*fecha de nacimiento:\s*(\d{2}\/\d{2}\/\d{4})\s*ud (no )?esta habilitado/i;
     const match = textBody.match(regex);
-    if (!match) return;
+    const isValidFormat = !!match; // true si coincide, false si no
 
+    // ----- INICIO DEL CAMBIO CLAVE -----
+    // Emitimos el mensaje a través de Socket.IO para el visor en vivo
+    req.app.get('io').emit('new-webhook-message', {
+        from: from,
+        text: textBody,
+        isValidFormat: isValidFormat
+    });
+    // ----- FIN DEL CAMBIO CLAVE -----
+
+    // Si el formato no es válido, no hacemos nada más.
+    if (!isValidFormat) return;
+
+    // Si el formato es válido, continuamos con la lógica de siempre.
     const [, cedula, fechaNacStr, notKeyword] = match;
     const isConfirmed = !notKeyword;
     const status = isConfirmed ? 'Confirmado' : 'No Confirmado';
