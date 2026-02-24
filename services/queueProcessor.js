@@ -151,7 +151,7 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
             to: recipientNumber,
             type: 'template',
             template: {
-                name: 'hello_world',
+                name: 'mensaje_activacion_',
                 language: { code: 'en_US' }
             }
         }, { headers: HEADERS });
