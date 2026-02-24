@@ -139,42 +139,27 @@ async function executeUnifiedSendSequence(task, workerIndex) {
 }
 
 async function executeActivationSequence(recipientNumber, workerIndex) {
-    const sender         = state.senderPool[workerIndex];
-    const API_URL        = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
-    const HEADERS        = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
-    const publicImageUrl = `${config.RENDER_EXTERNAL_URL}/assets/${config.ACTIVATION_IMAGE_NAME}`;
+    const sender  = state.senderPool[workerIndex];
+    const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
+    const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
 
     try {
         helpers.logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template de activación...`, 'log-info');
-        await axios.post(API_URL, {
-            messaging_product: 'whatsapp', to: recipientNumber,
-            type: 'template', template: { name: 'hello_world', language: { code: 'en_US' } },
-        }, { headers: HEADERS });
-        await helpers.delay(state.delaySettings.delay1);
 
         await axios.post(API_URL, {
-            messaging_product: 'whatsapp', to: recipientNumber,
-            type: 'text', text: { body: '3' },
+            messaging_product: 'whatsapp',
+            to: recipientNumber,
+            type: 'template',
+            template: {
+                name: 'hello_world',
+                language: { code: 'en_US' }
+            }
         }, { headers: HEADERS });
-        await helpers.delay(state.delaySettings.delay2);
 
-        helpers.logAndEmit(`[Worker ${workerIndex}] 📤 Enviando imagen de activación...`, 'log-info');
-        await axios.post(API_URL, {
-            messaging_product: 'whatsapp', to: recipientNumber,
-            type: 'image', image: { link: publicImageUrl },
-        }, { headers: HEADERS });
-        await helpers.delay(5000);
-
-        await db.pool.query(
-            `INSERT INTO conversation_windows (recipient_number, last_activation_time)
-             VALUES ($1, NOW())
-             ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`,
-            [recipientNumber]
+        helpers.logAndEmit(
+          `[Worker ${workerIndex}] ⏳ Template enviado. Esperando respuesta del usuario...`,
+          'log-info'
         );
-        helpers.logAndEmit(`[Worker ${workerIndex}] ✅ Ventana de 24h activada para ${recipientNumber}.`, 'log-success');
-
-        const windowState = await db.getConversationWindowState(recipientNumber);
-        io.emit('window-status-update', windowState);
 
     } catch (error) {
         const msg = error.response?.data?.error?.message || error.message;
