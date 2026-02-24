@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Bot Autónomo</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --color-bg: #f8f9fa;
+            --color-surface: #ffffff;
+            --color-primary: #007bff;
+            --color-primary-hover: #0069d9;
+            --color-danger: #dc3545;
+            --color-danger-hover: #c82333;
+            --color-success: #28a745;
+            --color-warn: #ffc107;
+            --color-info: #17a2b8;
+            --color-inactive: #6c757d;
+            --color-text: #212529;
+            --color-text-secondary: #6c757d;
+            --color-border: #dee2e6;
+            --color-input-bg: #f1f3f5;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="dark"] {
+            --color-bg: #121212;
+            --color-surface: #1e1e1e;
+            --color-primary: #3793ff;
+            --color-primary-hover: #5fa5ff;
+            --color-danger: #e5484d;
+            --color-danger-hover: #ff5c61;
+            --color-text: #e9ecef;
+            --color-text-secondary: #adb5bd;
+            --color-border: #343a40;
+            --color-input-bg: #2c2c2e;
+            --shadow-color: rgba(0, 0, 0, 0.4);
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--color-bg);
+            color: var(--color-text);
+            margin: 0;
+            padding: 2rem;
+            line-height: 1.6;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        #theme-switcher {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            width: 45px;
+            height: 45px;
+            background-color: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px var(--shadow-color);
+            transition: all 0.3s ease;
+            overflow: hidden;
+            z-index: 1000;
+        }
+
+        #theme-switcher:hover {
+            transform: translateY(-2px) scale(1.05);
+            box-shadow: 0 4px 12px var(--shadow-color);
+        }
+
+        #theme-switcher .icon {
+            font-size: 1.2rem;
+            position: absolute;
+            transition: transform 0.4s ease, opacity 0.4s ease;
+        }
+
+        #theme-switcher .sun {
+            color: #f5a623;
+        }
+
+        #theme-switcher .moon {
+            color: #50b1f5;
+        }
+
+             [data-theme="light"] .moon {
+            transform: translateY(100%) rotate(90deg);
+            opacity: 0;
+        }
+
+        [data-theme="light"] .sun {
+            transform: translateY(0) rotate(0);
+            opacity: 1;
+        }
+
+        [data-theme="dark"] .sun {
+            transform: translateY(-100%) rotate(-90deg);
+            opacity: 0;
+        }
+
+        [data-theme="dark"] .moon {
+            transform: translateY(0) rotate(0);
+            opacity: 1;
+        }
+
+        .main-container {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .header {
+            margin-bottom: 1rem;
+            animation: fadeInUp 0.5s ease-out forwards;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .card {
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            border: 1px solid var(--color-border);
+            box-shadow: 0 4px 12px var(--shadow-color);
+            padding: 25px 30px;
+            box-sizing: border-box;
+            animation: fadeInUp 0.6s ease-out forwards;
+            animation-delay: calc(var(--card-index) * 0.1s);
+            opacity: 0;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-top: 0;
+            padding-bottom: 15px;
+            margin-bottom: 25px;
+            border-bottom: 1px solid var(--color-border);
+            font-weight: 600;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+        }
+
+        .status-box {
+            background-color: var(--color-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--color-border);
+            text-align: center;
+        }
+
+        .status-box .label {
+            font-size: 0.9rem;
+            color: var(--color-text-secondary);
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .status-box .value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .status-indicator {
+            padding: 5px 15px;
+            border-radius: 50px;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-transform: capitalize;
+            display: inline-block;
+        }
+
+        .status-indicator.running {
+            background-color: var(--color-success);
+        }
+
+        .status-indicator.paused {
+            background-color: var(--color-warn);
+            color: #1e1e1e;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            font-size: 0.9rem;
+        }
+
+        input[type="text"],
+        input[type="file"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+            background-color: var(--color-input-bg);
+            color: var(--color-text);
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 25%, transparent);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:disabled {
+            background-color: var(--color-inactive);
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .btn .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .btn-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .btn-danger {
+            background-color: var(--color-danger);
+            color: white;
+        }
+
+        .btn-secondary {
+            background-color: var(--color-input-bg);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        hr {
+            border: 0;
+            height: 1px;
+            background: var(--color-border);
+            margin: 30px 0;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: var(--color-surface);
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--color-danger);
+        }
+
+        .modal-content i {
+            font-size: 3rem;
+            color: var(--color-danger);
+            margin-bottom: 15px;
+        }
+
+        .modal-content h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.5rem;
+        }
+
+        .modal-content p {
+            margin: 0 0 25px 0;
+            color: var(--color-text-secondary);
+        }
+
+        #zip-list {
+            list-style: none;
+            padding: 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        #zip-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        #zip-list li:last-child {
+            border-bottom: none;
+        }
+
+        #zip-list a {
+            text-decoration: none;
+            color: var(--color-primary);
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+                padding-top: 6rem;
+            }
+
+            #theme-switcher {
+                top: 1rem;
+                right: 1rem;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .card {
+                padding: 20px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <button id="theme-switcher" title="Cambiar tema">
+        <i class="fas fa-sun icon sun"></i>
+        <i class="fas fa-moon icon moon"></i>
+    </button>
+
+    <div id="failure-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <i class="fas fa-exclamation-triangle"></i>
+            <h3>Fallo Crítico del Sistema</h3>
+            <p id="failure-modal-message">Mensaje de error aquí.</p>
+            <button id="reset-failure-button" class="btn btn-danger">Entendido, Resetear Estado</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <header class="header">
+            <h1>Dashboard de Operación</h1>
+        </header>
+
+        <div class="card" style="--card-index: 1;">
+            <h2><i class="fas fa-tachometer-alt"></i> Estado del Sistema</h2>
+            <div class="status-grid">
+                <div class="status-box">
+                    <div class="label">Tareas en Cola</div>
+                    <div class="value" id="queue-count">0</div>
+                </div>
+                <div class="status-box">
+                    <div class="label">Números Libres</div>
+                    <div class="value" id="available-numbers-count" style="color: var(--color-success);">0</div>
+                </div>
+                <div class="status-box">
+                    <div class="label">Números Ocupados</div>
+                    <div class="value" id="active-numbers-count" style="color: var(--color-warn);">0</div>
+                </div>
+                <div class="status-box">
+                    <div class="label">Estado Proceso</div>
+                    <div class="value"><span id="queue-status-indicator" class="status-indicator running">Activa</span>
+                    </div>
+                </div>
+            </div>
+            <hr>
+            <h2><i class="fas fa-chart-pie"></i> Estadísticas de Respuestas</h2>
+            <div class="status-grid">
+                <div class="status-box">
+                    <div class="label">Confirmados</div>
+                    <div class="value" id="confirmed-count" style="color: var(--color-success);">0</div>
+                </div>
+                <div class="status-box">
+                    <div class="label">No Confirmados</div>
+                    <div class="value" id="not-confirmed-count" style="color: var(--color-danger);">0</div>
+                </div>
+                <div class="status-box">
+                    <div class="label">Total Respuestas</div>
+                    <div class="value" id="total-count">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="--card-index: 2;">
+            <h2><i class="fa-solid fa-sliders"></i> Control de la Cola</h2>
+            <button id="toggle-pause-button" class="btn btn-secondary"><i class="fa-solid fa-pause"></i> <span>Pausar
+                    Envíos</span></button>
+        </div>
+
+        <div class="card" style="--card-index: 3;">
+            <h2><i class="fa-solid fa-paper-plane"></i> Nuevo Envío</h2>
+            <form id="zip-form">
+                <div class="form-group">
+                    <label for="destinationNumber">Número de Destino</label>
+                    <input type="text" id="destinationNumber" name="destinationNumber" placeholder="Ej: 5491122334455"
+                        required>
+                </div>
+                <div class="form-group">
+                    <label for="zipFile">Archivo ZIP con Imágenes</label>
+                    <input type="file" id="zipFile" name="zipFile" accept=".zip" required>
+                </div>
+                <button type="submit" id="submitButton" class="btn btn-primary"><i class="fa-solid fa-upload"></i> Subir
+                    y Despachar</button>
+            </form>
+        </div>
+
+        <div class="card" style="--card-index: 4;">
+            <h2><i class="fa-solid fa-download"></i> Reportes y Descargas</h2>
+            <div class="button-group">
+                <button id="download-excel-button" class="btn btn-secondary"><i class="fa-solid fa-file-excel"
+                        style="color: var(--color-success);"></i> Excel (Confirmados)</button>
+                <button id="download-confirmed-zip-button" class="btn btn-secondary"><i class="fa-solid fa-file-archive"
+                        style="color: var(--color-primary);"></i> ZIP (Confirmados)</button>
+                <button id="download-not-confirmed-zip-button" class="btn btn-secondary"><i
+                        class="fa-solid fa-file-archive" style="color: var(--color-danger);"></i> ZIP (No
+                    Confirmados)</button>
+            </div>
+            <hr>
+            <h3>Historial de ZIPs Generados</h3>
+            <ul id="zip-list">
+                <li style="text-align: center; color: var(--color-text-secondary);">No hay ZIPs generados.</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        function setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
+        document.getElementById('theme-switcher').addEventListener('click', () => { const currentTheme = document.documentElement.getAttribute('data-theme'); const newTheme = currentTheme === 'dark' ? 'light' : 'dark'; setTheme(newTheme); });
+        (() => { const savedTheme = localStorage.getItem('theme'); const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; if (savedTheme) { setTheme(savedTheme); } else if (prefersDark) { setTheme('dark'); } })();
+
+        const socket = io();
+        const queueCount = document.getElementById('queue-count');
+        const availableNumbersCount = document.getElementById('available-numbers-count');
+        const activeNumbersCount = document.getElementById('active-numbers-count');
+        const queueStatusIndicator = document.getElementById('queue-status-indicator');
+        const togglePauseButton = document.getElementById('toggle-pause-button');
+        const confirmedCountEl = document.getElementById('confirmed-count');
+        const notConfirmedCountEl = document.getElementById('not-confirmed-count');
+        const totalCountEl = document.getElementById('total-count');
+        const failureModalOverlay = document.getElementById('failure-modal-overlay');
+        const failureModalMessage = document.getElementById('failure-modal-message');
+        const resetFailureButton = document.getElementById('reset-failure-button');
+        const zipList = document.getElementById('zip-list');
+        let isQueuePausedByAdmin = false;
+
+        document.getElementById('zip-form').addEventListener('submit', async (e) => { e.preventDefault(); const form = e.target, button = form.querySelector('button'), originalButtonContent = button.innerHTML, formData = new FormData(form); if (!formData.get('destinationNumber') || !formData.get('zipFile').name) return alert('Completa todos los campos.'); button.disabled = true; button.innerHTML = `<span class="spinner"></span> Procesando...`; try { const response = await fetch('/subir-zip', { method: 'POST', body: formData }); const result = await response.json(); if (!response.ok) throw new Error(result.message); alert(`Éxito: ${result.message}`); form.reset(); } catch (error) { alert(`Error al subir: ${error.message}`); } finally { button.disabled = false; button.innerHTML = originalButtonContent; } });
+        togglePauseButton.addEventListener('click', async () => { const endpoint = isQueuePausedByAdmin ? '/resume-queue' : '/pause-queue'; togglePauseButton.disabled = true; try { const response = await fetch(endpoint, { method: 'POST' }); if (!response.ok) { const error = await response.json(); throw new Error(error.message); } } catch (error) { alert(`Error: ${error.message}`); } finally { togglePauseButton.disabled = false; } });
+        document.getElementById('download-excel-button').addEventListener('click', () => window.location.href = '/download-confirmed-excel');
+        document.getElementById('download-confirmed-zip-button').addEventListener('click', () => window.location.href = '/download-confirmed-zip');
+        document.getElementById('download-not-confirmed-zip-button').addEventListener('click', () => window.location.href = '/download-not-confirmed-zip');
+        resetFailureButton.addEventListener('click', async () => { resetFailureButton.disabled = true; try { const response = await fetch('/reset-bot-failure', { method: 'POST' }); if (!response.ok) throw new Error('No se pudo resetear el estado.'); failureModalOverlay.style.display = 'none'; } catch (error) { alert(error.message); } finally { resetFailureButton.disabled = false; } });
+
+        async function fetchZipList() {
+            try {
+                const response = await fetch('/list-zips');
+                const files = await response.json();
+                zipList.innerHTML = '';
+                if (files.length === 0) {
+                    zipList.innerHTML = '<li style="text-align: center; color: var(--color-text-secondary);">No hay ZIPs generados.</li>';
+                } else {
+                    files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.textContent = file;
+                        const link = document.createElement('a');
+                        link.href = `/zips/${file}`;
+                        link.innerHTML = '<i class="fas fa-download"></i> Descargar';
+                        li.appendChild(link);
+                        zipList.appendChild(li);
+                    });
+                }
+            } catch (error) { console.error('Error fetching zip list:', error); }
+        }
+
+        socket.on('connect', () => { fetchZipList(); });
+        socket.on('queue-update', (size) => { queueCount.textContent = size; });
+        socket.on('workers-status-update', (data) => { availableNumbersCount.textContent = data.available; activeNumbersCount.textContent = data.active; });
+        socket.on('stats-update', (stats) => {
+            const confirmed = parseInt(stats.confirmed, 10) || 0;
+            const notConfirmed = parseInt(stats.notConfirmed, 10) || 0;
+            confirmedCountEl.textContent = confirmed;
+            notConfirmedCountEl.textContent = notConfirmed;
+            totalCountEl.textContent = confirmed + notConfirmed;
+        });
+        socket.on('queue-status-update', ({ isPaused }) => {
+            isQueuePausedByAdmin = isPaused;
+            const buttonTextSpan = togglePauseButton.querySelector('span'); const buttonIcon = togglePauseButton.querySelector('i');
+            if (isPaused) {
+                queueStatusIndicator.textContent = 'Pausada'; queueStatusIndicator.className = 'status-indicator paused'; buttonTextSpan.textContent = 'Reanudar Envíos'; buttonIcon.className = 'fa-solid fa-play'; togglePauseButton.classList.remove('btn-secondary'); togglePauseButton.classList.add('btn-primary');
+            } else { queueStatusIndicator.textContent = 'Activa'; queueStatusIndicator.className = 'status-indicator running'; buttonTextSpan.textContent = 'Pausar Envíos'; buttonIcon.className = 'fa-solid fa-pause'; togglePauseButton.classList.remove('btn-primary'); togglePauseButton.classList.add('btn-secondary'); }
+        });
+        socket.on('bot-failure', (failureInfo) => { failureModalMessage.textContent = failureInfo.message; failureModalOverlay.style.display = 'flex'; });
+        socket.on('bot-failure-resolved', () => { failureModalOverlay.style.display = 'none'; });
+    </script>
+</body>
+
+</html>
