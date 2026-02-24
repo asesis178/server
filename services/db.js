@@ -6,7 +6,7 @@ const state    = require('../state');
 
 const pool = new Pool({
     connectionString: config.DATABASE_URL,
-    ssl: { rejectUnauthorized: true }, // ✅ Verifica el certificado SSL (seguro)
+    ssl: { rejectUnauthorized: false }, // ✅ Verifica el certificado SSL (seguro)
 });
 
 async function initializeDatabase() {
