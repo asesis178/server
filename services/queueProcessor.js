@@ -139,13 +139,13 @@ async function executeUnifiedSendSequence(task, workerIndex) {
 }
 
 async function executeActivationSequence(recipientNumber, workerIndex) {
-    const sender = state.senderPool[workerIndex];
-    const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
-    const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+    const sender         = state.senderPool[workerIndex];
+    const API_URL        = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
+    const HEADERS        = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
+    const publicImageUrl = `${config.RENDER_EXTERNAL_URL}/assets/${config.ACTIVATION_IMAGE_NAME}`;
 
     try {
         helpers.logAndEmit(`[Worker ${workerIndex}] 📤 Enviando Template de activación...`, 'log-info');
-
         await axios.post(API_URL, {
             messaging_product: 'whatsapp',
             to: recipientNumber,
@@ -153,10 +153,18 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
             template: { name: 'mensaje_activacion_', language: { code: 'es_UY' } }
         }, { headers: HEADERS });
 
-        helpers.logAndEmit(
-            `[Worker ${workerIndex}] ⏳ Template enviado. Esperando respuesta del usuario...`,
-            'log-info'
+        // ✅ Registrar ventana INMEDIATAMENTE después del template
+        // Esto evita que processQueue vea INACTIVE y vuelva a activar
+        await db.pool.query(
+            `INSERT INTO conversation_windows (recipient_number, last_activation_time)
+             VALUES ($1, NOW())
+             ON CONFLICT (recipient_number) DO UPDATE SET last_activation_time = NOW()`,
+            [recipientNumber]
         );
+        helpers.logAndEmit(`[Worker ${workerIndex}] ✅ Ventana registrada para ${recipientNumber}. Esperando respuesta del usuario...`, 'log-success');
+
+        const windowState = await db.getConversationWindowState(recipientNumber);
+        io.emit('window-status-update', windowState);
 
     } catch (error) {
         const msg = error.response?.data?.error?.message || error.message;

@@ -442,4 +442,14 @@ router.post('/update-delays', requireAuth, requireAdmin, (req, res) => {
     res.status(200).json({ message: 'Delays actualizados.' });
 });
 
+
+
+router.post('/admin/reset-db', requireAuth, requireAdmin, async (req, res) => {
+    await db.pool.query("DELETE FROM conversation_windows");
+    await db.pool.query("UPDATE envios SET estado = 'cancelled' WHERE estado IN ('pending', 'procesando')");
+    state.taskQueue = [];
+    req.app.get('io').emit('queue-update', 0);
+    res.json({ message: 'DB limpiada OK' });
+});
+
 module.exports = router;
