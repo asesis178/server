@@ -1,9 +1,9 @@
 // /services/queueProcessor.js
-const axios   = require('axios');
-const state   = require('../state');
-const db      = require('./db');
+const axios = require('axios');
+const state = require('../state');
+const db = require('./db');
 const helpers = require('../utils/helpers');
-const config  = require('../config');
+const config = require('../config');
 
 let io;
 
@@ -15,7 +15,7 @@ function releaseWorkerAndContinue(workerIndex) {
     state.availableWorkers.add(workerIndex);
     io.emit('workers-status-update', {
         available: state.availableWorkers.size,
-        active:    state.senderPool.length - state.availableWorkers.size,
+        active: state.senderPool.length - state.availableWorkers.size,
     });
     setTimeout(processQueue, state.delaySettings.taskSeparation);
 }
@@ -25,7 +25,7 @@ async function processQueue() {
         helpers.stopWebhookWatchdog();
     }
     if (
-        state.isQueueProcessingPaused   ||
+        state.isQueueProcessingPaused ||
         state.isConversationCheckPaused ||
         state.availableWorkers.size === 0 ||
         state.taskQueue.length === 0
@@ -38,7 +38,7 @@ async function processQueue() {
 
     helpers.startWebhookWatchdog(db.pool);
     const nextRecipient = state.taskQueue[0].recipientNumber;
-    const windowState   = await db.getConversationWindowState(nextRecipient);
+    const windowState = await db.getConversationWindowState(nextRecipient);
     io.emit('window-status-update', windowState);
 
     if (windowState.status === 'COOL_DOWN' || windowState.status === 'EXPIRING_SOON') {
@@ -64,7 +64,7 @@ async function processQueue() {
         state.availableWorkers.delete(workerIndex);
         io.emit('workers-status-update', {
             available: state.availableWorkers.size,
-            active:    state.senderPool.length - state.availableWorkers.size,
+            active: state.senderPool.length - state.availableWorkers.size,
         });
 
         const task = state.taskQueue.shift();
@@ -88,7 +88,7 @@ async function processQueue() {
 
 async function executeUnifiedSendSequence(task, workerIndex) {
     const { id, recipientNumber, imageName } = task;
-    const sender  = state.senderPool[workerIndex];
+    const sender = state.senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
 
@@ -139,7 +139,7 @@ async function executeUnifiedSendSequence(task, workerIndex) {
 }
 
 async function executeActivationSequence(recipientNumber, workerIndex) {
-    const sender  = state.senderPool[workerIndex];
+    const sender = state.senderPool[workerIndex];
     const API_URL = `https://graph.facebook.com/v19.0/${sender.id}/messages`;
     const HEADERS = { 'Authorization': `Bearer ${sender.token}`, 'Content-Type': 'application/json' };
 
@@ -150,15 +150,12 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
             messaging_product: 'whatsapp',
             to: recipientNumber,
             type: 'template',
-            template: {
-                name: 'mensaje_activacion_',
-                language: { code: 'en_US' }
-            }
+            template: { name: 'mensaje_activacion_', language: { code: 'es' } }
         }, { headers: HEADERS });
 
         helpers.logAndEmit(
-          `[Worker ${workerIndex}] ⏳ Template enviado. Esperando respuesta del usuario...`,
-          'log-info'
+            `[Worker ${workerIndex}] ⏳ Template enviado. Esperando respuesta del usuario...`,
+            'log-info'
         );
 
     } catch (error) {
