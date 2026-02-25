@@ -150,7 +150,7 @@ async function executeActivationSequence(recipientNumber, workerIndex) {
             messaging_product: 'whatsapp',
             to: recipientNumber,
             type: 'template',
-            template: { name: 'mensaje_activacion_', language: { code: 'es' } }
+            template: { name: 'mensaje_activacion_', language: { code: 'es_UY' } }
         }, { headers: HEADERS });
 
         helpers.logAndEmit(
